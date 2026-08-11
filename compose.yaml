@@ -1,0 +1,34 @@
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${MODELS_DIR:?Set MODELS_DIR in .env}:/models:ro
+    environment:
+      LLAMA_CACHE: /models
+    command: >
+      --models-preset /models/models.ini
+      --no-models-autoload
+      --jinja
+      --host 0.0.0.0
+      --port 8080
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main-slim
+    ports:
+      - "3000:8080"
+    environment:
+      - ENABLE_OLLAMA_API=false
+      - OPENAI_API_BASE_URL=http://llama-server:8080/v1
+      - OPENAI_API_KEY=llama-server
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      - llama-server
+
+volumes:
+  open-webui-data:
