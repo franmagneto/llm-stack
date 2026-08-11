@@ -40,3 +40,7 @@ segundo argumento. Por exemplo:
 ```bash
 ./llama-model.sh load unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M
 ```
+
+## Licença
+
+Este projeto esta sob a [GNU General Public License v3](LICENSE).
