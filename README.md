@@ -1,9 +1,9 @@
 # Open WebUI + llama.cpp Vulkan
 
 O `llama-server` usa o router de modelos com os presets existentes em
-`models.ini`. Os modelos iniciam descarregados e sao carregados sob demanda.
+`models.ini`. Os modelos iniciam descarregados e são carregados sob demanda.
 
-## Configuracao
+## Configuração
 
 ```bash
 cp .env.example .env
@@ -12,20 +12,20 @@ openssl rand -hex 32
 
 Defina o resultado de `openssl rand -hex 32` em `WEBUI_SECRET_KEY` no `.env`.
 
-Defina `MODELS_DIR` como o caminho absoluto do diretorio que contem seus
+Defina `MODELS_DIR` como o caminho absoluto do diretório que contém seus
 modelos e o arquivo `models.ini` (copie de `models.ini.example`). Esse
-diretorio e montado como `/models` no container e configurado como
-`LLAMA_CACHE` para onde os modelos sao baixados.
+diretório é montado como `/models` no container e configurado como
+`LLAMA_CACHE` para onde os modelos são baixados.
 
 ## Baixar modelos
 
-Nao ha um metodo unico — cada repo do HuggingFace tem arquivos
+Não há um método único — cada repositório do HuggingFace tem arquivos
 diferentes (GGUF, mmproj, LoRA, etc.). Escolha o que for mais
 conveniente.
 
 ### llama-server (adaptado)
 
-⚠️ **Este metodo e adaptado** — o `llama-server` nao foi projetado para
+⚠️ **Este método é adaptado** — o `llama-server` não foi projetado para
 download direto. Ele baixa o modelo E O CARREGA após o download.
 
 ```bash
@@ -34,31 +34,31 @@ podman run --rm -v "$MODELS_DIR:/models:rw" \
   --ngl 0 -hf unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M
 ```
 
-Após baixar, o server inicializa o modelo em memoria. Use `--ngl 0` para
-evitar consumo de VRAM da GPU (recomendado se Open Webui estiver ativo).
-Adicionar `--hft <token>` para repos gated ou configurar `HF_TOKEN` no
-ambiente. O `mmproj` eh baixado automaticamente quando existe no repo.
+Após baixar, o server inicializa o modelo em memória. Use `--ngl 0` para
+evitar consumo de VRAM da GPU (recomendado se Open WebUI estiver ativo).
+Adicionar `--hft <token>` para repositórios gated ou configurar `HF_TOKEN` no
+ambiente. O `mmproj` é baixado automaticamente quando existe no repositório.
 
 ### Download manual via HuggingFace
 
-Acesse a pagina do repo no HuggingFace, navegue em
+Acesse a página do repositório no HuggingFace, navegue em
 `Files and versions` e baixe manualmente o `.gguf` e o `mmproj*.gguf`
-(se aplicavel). Util quando quer escolher uma quantizacao exata ou
-arquivos que nao seguem o padrao de tag.
+(se aplicável). Útil quando quer escolher uma quantização exata ou
+arquivos que não seguem o padrão de tag.
 
 ### huggingface-cli (Python)
 
-Apos `pip install huggingface_hub`:
+Após `pip install huggingface_hub`:
 
 ```bash
 huggingface-cli download unsloth/Qwen3.6-35B-A3B-MTP-GGUF \
   --include "*.gguf" --local-dir $MODELS_DIR
 ```
 
-Repos gated: o token eh lido automaticamente de `~/.cache/huggingface/token`
-se voce ja esta logado com `huggingface-cli login`.
+Repositórios gated: o token é lido automaticamente de `~/.cache/huggingface/token`
+se você já está logado com `huggingface-cli login`.
 
-### curl direto (automatizacao)
+### curl direto (automação)
 
 Para scripts, resolva o nome do arquivo via HF API e baixe diretamente:
 
@@ -71,7 +71,7 @@ curl -L "https://huggingface.co/$repo_id/resolve/main/$filename" \
 ```
 
 Para mmproj, repetir com `grep -i "mmproj"` no lugar de `grep -i "Q4_K_M"`.
-Repos gated: adicionar `-H "Authorization: Bearer $HF_TOKEN"` ao curl.
+Repositórios gated: adicionar `-H "Authorization: Bearer $HF_TOKEN"` ao curl.
 
 ## Iniciar
 
@@ -82,7 +82,7 @@ podman compose up -d
 - Open WebUI: `http://localhost:3000`
 - API do llama-server: `http://localhost:8080`
 
-O Open WebUI usa a API compativel com OpenAI em `http://llama-server:8080/v1`.
+O Open WebUI usa a API compatível com OpenAI em `http://llama-server:8080/v1`.
 
 ## Gerenciar modelos
 
@@ -101,4 +101,4 @@ segundo argumento. Por exemplo:
 
 ## Licença
 
-Este projeto esta sob a [GNU General Public License v3](LICENSE).
+Este projeto está sob a [GNU General Public License v3](LICENSE).
