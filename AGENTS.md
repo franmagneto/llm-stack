@@ -4,6 +4,7 @@
 
 - `compose.yaml` — infra local (llama-server Vulkan + Open WebUI)
 - `.env.example` — variáveis de ambiente obrigatórias
+- `models.ini.example` — exemplo de presets de modelos para o llama-server
 - `llama-model.sh` — CLI para gerenciar modelos sob demanda
 - `README.md` — instruções de uso
 

@@ -11,6 +11,14 @@ openssl rand -hex 32
 ```
 
 Defina o resultado de `openssl rand -hex 32` em `WEBUI_SECRET_KEY` no `.env`.
+
+Crie o `models.ini` que define os presets de modelos para o llama-server:
+
+```bash
+cp models.ini.example models.ini
+```
+
+Edite-o para ajustar parâmetros como `threads`, `batch-size` e a lista de modelos.
 Defina `MODELS_DIR` como o caminho absoluto do diretorio que contem
 `models.ini` e o cache dos modelos. Esse diretorio e montado como `/models` e
 configurado como `LLAMA_CACHE` no container.
