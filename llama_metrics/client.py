@@ -170,18 +170,18 @@ def _now_seconds() -> int:
 
 
 # ============================================================================
-# Métricas derivadas — nomes reais do llvm.cpp prometheus output
+# Métricas derivadas — nomes reais do llama.cpp prometheus output
 # ============================================================================
 
 # Mapeamento nome real → descritivo
 _METRIC_MAP = {
-    "llama_prompt_tokens_total": "prompt_tokens",
-    "llama_token_cache": "cached_tokens",
-    "llama_token_pred": "predicted_tokens",
-    "llama_n_context": "active_contexts",
-    "llama_n_prompt": "prompt_count",
-    "llama_prompt_duration_total": "prompt_duration_total",
-    "llama_token_duration_total": "token_duration_total",
+    "llamacpp:prompt_tokens_total": "prompt_tokens",
+    "llamacpp:token_cache": "cached_tokens",
+    "llamacpp:token_pred": "predicted_tokens",
+    "llamacpp:n_context": "active_contexts",
+    "llamacpp:n_prompt": "prompt_count",
+    "llamacpp:prompt_duration_total": "prompt_duration_total",
+    "llamacpp:token_duration_total": "token_duration_total",
 }
 
 
@@ -204,11 +204,13 @@ def _sum_all_metrics(metrics: Metrics, prefix: str) -> float:
 
 def get_context_tps(metrics: Metrics) -> float | None:
     """Tokens per segundo processados no contexto (prompt)."""
-    # llama_prompt_tokens_seconds é histogram com sum/count → TPS = count / sum
-    val = metrics.get("llama_prompt_tokens_seconds")
-    if isinstance(val, HistogramMetric) and val.bucket_count > 0 and val.bucket_sum > 0:
-        return val.bucket_count / val.bucket_sum
+    val = metrics.get("llamacpp:prompt_seconds_total")
+    total_tokens = _sum_metric(metrics, "llamacpp:prompt_tokens_total")
+    if val and isinstance(val, CounterMetric) and val.value > 0 and total_tokens:
+        return total_tokens / val.value
     return None
+
+
 
 
 
@@ -216,15 +218,16 @@ def get_context_tps(metrics: Metrics) -> float | None:
 
 def get_sampling_tps(metrics: Metrics) -> float | None:
     """Tokens per segundo amostrados (tokens gerados por segundo)."""
-    val = metrics.get("llama_token_tokens_seconds")
-    if isinstance(val, HistogramMetric) and val.bucket_count > 0 and val.bucket_sum > 0:
-        return val.bucket_count / val.bucket_sum
+    val = metrics.get("llamacpp:tokens_predicted_seconds_total")
+    total_tokens = _sum_metric(metrics, "llamacpp:tokens_predicted_total")
+    if val and isinstance(val, CounterMetric) and val.value > 0 and total_tokens:
+        return total_tokens / val.value
     return None
 
 
 def get_prompt_duration_s(metrics: Metrics) -> float | None:
     """Tempo total de processamento do prompt (segundos)."""
-    val = metrics.get("llama_prompt_duration_total")
+    val = metrics.get("llamacpp:prompt_seconds_total")
     if isinstance(val, CounterMetric):
         return val.value
     return None
@@ -232,7 +235,7 @@ def get_prompt_duration_s(metrics: Metrics) -> float | None:
 
 def get_gen_duration_s(metrics: Metrics) -> float | None:
     """Tempo total de token generation (segundos)."""
-    val = metrics.get("llama_token_duration_total")
+    val = metrics.get("llamacpp:tokens_predicted_seconds_total")
     if isinstance(val, CounterMetric):
         return val.value
     return None
@@ -240,19 +243,19 @@ def get_gen_duration_s(metrics: Metrics) -> float | None:
 
 def get_total_prompt_tokens(metrics: Metrics) -> int:
     """Total de tokens processados no prompt."""
-    return int(_sum_metric(metrics, "llama_prompt_tokens_total") or 0)
+    return int(_sum_metric(metrics, "llamacpp:prompt_tokens_total") or 0)
 
 
 def get_total_tokens(metrics: Metrics) -> int:
     """Total de tokens (prompt + geração)."""
-    prompt = _sum_metric(metrics, "llama_prompt_tokens_total") or 0
-    pred = _sum_metric(metrics, "llama_token_pred") or 0
+    prompt = _sum_metric(metrics, "llamacpp:prompt_tokens_total") or 0
+    pred = _sum_metric(metrics, "llamacpp:tokens_predicted_total") or 0
     return int(prompt + pred)
 
 
 def get_n_prompt(metrics: Metrics) -> int:
     """Total de requisições de prompt (completions)."""
-    val = metrics.get("llama_n_prompt")
+    val = metrics.get("llamacpp:n_decode_total")
     if isinstance(val, CounterMetric):
         return int(val.value)
     return 0
@@ -260,50 +263,49 @@ def get_n_prompt(metrics: Metrics) -> int:
 
 def get_n_pred(metrics: Metrics) -> int:
     """Total de tokens gerados."""
-    return int(_sum_metric(metrics, "llama_token_pred") or 0)
+    return int(_sum_metric(metrics, "llamacpp:tokens_predicted_total") or 0)
 
 
 def get_n_tokens_cached(metrics: Metrics) -> int:
-    """Tokens encontrado em cache KV."""
-    return int(_sum_metric(metrics, "llama_token_cache") or 0)
+    """Tokens aceitos no spec decode (draft acceptance)."""
+    return int(_sum_metric(metrics, "llamacpp:spec_decode_num_accepted_tokens_total") or 0)
 
 
 def get_cache_hit_pct(metrics: Metrics) -> float | None:
-    """Taxa de acerto de cache KV (cache_hits / (cache_hits + cache_misses) * 100)."""
-    cached = _sum_metric(metrics, "llama_token_cache") or 0
-    pred = _sum_metric(metrics, "llama_token_pred") or 0
-    total = cached + pred
-    if total == 0:
+    """Taxa de aceitação de drafts (cache hit aproximado para MTP)."""
+    accepted = _sum_metric(metrics, "llamacpp:spec_decode_num_accepted_tokens_total") or 0
+    drafts = _sum_metric(metrics, "llamacpp:spec_decode_num_draft_tokens_total") or 0
+    if drafts == 0:
         return None
-    return cached / total * 100
+    return accepted / drafts * 100
 
 
 def get_n_tokens_pred(metrics: Metrics) -> int:
-    """Tokens previstos (não cache)."""
-    return int(_sum_metric(metrics, "llama_token_pred") or 0)
+    """Tokens previstos (spec decode generated)."""
+    return int(_sum_metric(metrics, "llamacpp:spec_decode_num_draft_tokens_total") or 0)
 
 
 def get_n_context(metrics: Metrics) -> int:
     """Número atual de contextos ativos."""
-    val = metrics.get("llama_n_context")
+    val = metrics.get("llamacpp:n_tokens_max")
     if isinstance(val, CounterMetric):
         return int(val.value)
     return 0
 
 
 def get_prompt_tokens_seconds_p50(metrics: Metrics) -> float | None:
-    """P50 do histograma prompt_tokens_seconds (tps, não ms)."""
-    val = metrics.get("llama_prompt_tokens_seconds")
-    if isinstance(val, HistogramMetric) and val.buckets:
-        return _histogram_percentile(val, 50)
+    """Valor atual do gauge prompt_tokens_seconds (tps mediano aproximado)."""
+    val = metrics.get("llamacpp:prompt_tokens_seconds")
+    if isinstance(val, UntypedMetric) and val.value > 0:
+        return val.value
     return None
 
 
 def get_generation_tokens_seconds_p50(metrics: Metrics) -> float | None:
-    """P50 do histograma token_tokens_seconds (tps, não ms)."""
-    val = metrics.get("llama_token_tokens_seconds")
-    if isinstance(val, HistogramMetric) and val.buckets:
-        return _histogram_percentile(val, 50)
+    """Valor atual do gauge predicted_tokens_seconds (tps mediano aproximado)."""
+    val = metrics.get("llamacpp:predicted_tokens_seconds")
+    if isinstance(val, UntypedMetric) and val.value > 0:
+        return val.value
     return None
 
 

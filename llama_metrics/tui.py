@@ -22,6 +22,15 @@ POLL_INTERVAL = 2  # seconds
 MAX_HISTORY = 30
 
 
+def _get_model_param() -> str:
+    """Retorna o parâmetro de modelo para o endpoint /metrics."""
+    import os
+    model = os.getenv("LLAMA_MODEL")
+    if model:
+        return f"?model={model}"
+    return "?model=unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M"
+
+
 @dataclass
 class MetricSnapshot:
     prompt_tps: float | None = None
@@ -50,7 +59,8 @@ class MetricsClient:
 
     def poll(self) -> MetricSnapshot | None:
         try:
-            req = urllib.request.Request(f"{self.url}")
+            url = f"{self.url}{_get_model_param()}"
+            req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=3) as resp:
                 raw = resp.read().decode("utf-8")
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
@@ -404,7 +414,8 @@ class MainScreen(Screen):
         self._refresh_id = self.set_interval(POLL_INTERVAL, self.refresh_metrics)
 
     def _set_url_default(self):
-        self._url.update("llama.cpp metrics → localhost:8080")
+        model = _get_model_param().split("=")[-1]
+        self._url.update(f"llama.cpp metrics → localhost:8080?model={model}")
         self._status.update("● Connecting...")
         self._status.add_class("status-disconnected")
 
