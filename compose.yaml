@@ -15,6 +15,7 @@ services:
       --jinja
       --host 0.0.0.0
       --port 8080
+      --metrics
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main-slim
