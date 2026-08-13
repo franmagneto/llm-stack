@@ -127,14 +127,14 @@ class DashboardView(Static):
 
     .metric-row {
         height: 3;
-        border: solid bluish;
+        border: solid cyan;
         margin-bottom: 1;
         padding: 0 1;
     }
 
     .metric-title {
         text-align: center;
-        color: bluish;
+        color: cyan;
         text-style: bold;
         width: 100%;
         margin-bottom: 1;
@@ -166,7 +166,7 @@ class DashboardView(Static):
 
     .metric-text {
         margin-left: 1;
-        max-width: 100%%;
+        max-width: 100%;
     }
 
     .value-good {
@@ -276,22 +276,22 @@ class HistoryChart(Static):
     CSS = """
     HistoryChart {
         background: $boost;
-        border: solid bluish;
+        border: solid cyan;
         padding: 1;
         height: 8;
-        width: 100%%;
+        width: 100%;
     }
 
     .chart-title {
         text-align: center;
-        color: bluish;
+        color: cyan;
         text-style: bold;
         width: 100%;
         margin-bottom: 1;
     }
 
     #chart-canvas {
-        width: 100%%;
+        width: 100%;
         height: calc(100% - 2);
     }
     """
@@ -311,9 +311,9 @@ class HistoryChart(Static):
             self._cache_hist.append(cached)
         if sample is not None:
             self._sample_hist.append(sample)
-        self._render()
+        self._draw()
 
-    def _render(self):
+    def _build_lines(self):
         data = [
             ("  Prompt:  ", self._prompt_hist, "cyan"),
             ("  Gen:     ", self._sample_hist, "yellow"),
@@ -331,7 +331,11 @@ class HistoryChart(Static):
             )
             lines.append(f"{label}{bar} ({hist[-1]:.1f})")
 
-        self._canvas.update("\n".join(lines))
+        return "\n".join(lines)
+
+    def _draw(self):
+        text = self._build_lines()
+        self._canvas.update(text)
 
 
 class MainScreen(Screen):
@@ -340,8 +344,8 @@ class MainScreen(Screen):
     CSS = """
     MainScreen {
         align: center middle;
-        width: 100%%;
-        height: 100%%;
+        width: 100%;
+        height: 100%;
     }
 
     #header-row {
@@ -349,19 +353,19 @@ class MainScreen(Screen):
         width: 100%;
         dock: top;
         background: #1a1b26;
-        border: solid bluish;
+        border: solid cyan;
     }
 
     #main-content {
-        width: 100%%;
-        height: 100%%;
+        width: 100%;
+        height: 100%;
         margin-top: 1;
         margin-bottom: 1;
     }
 
     #bottom-row {
         height: 10;
-        width: 100%%;
+        width: 100%;
         dock: bottom;
         margin-bottom: 1;
     }
@@ -401,7 +405,7 @@ class MainScreen(Screen):
 
     def _set_url_default(self):
         self._url.update("llama.cpp metrics → localhost:8080")
-        self._status.update("● Loading...")
+        self._status.update("● Connecting...")
         self._status.add_class("status-disconnected")
 
     def get_metrics(self) -> MetricSnapshot | None:
@@ -412,6 +416,10 @@ class MainScreen(Screen):
 
     def refresh_metrics(self):
         """Atualiza o dashboard com nova leitura."""
+        if not hasattr(self, '_connect_attempts'):
+            self._connect_attempts = 0
+        self._connect_attempts += 1
+
         snap = self.get_metrics()
         if snap:
             dash = self.query_one("#dashboard", DashboardView)
@@ -428,6 +436,10 @@ class MainScreen(Screen):
             self._status.update("● Disconnected")
             self._status.add_class("status-disconnected")
             self._status.remove_class("status-connected")
+            if self._connect_attempts >= POLL_INTERVAL * 2:
+                self._status.update(
+                    "● Disconnected — check compose.yaml for 'LLAMA_ARG_ENDPOINT_METRICS=true' env var"
+                )
 
 
 class MetricsApp(App):
@@ -447,7 +459,6 @@ class MetricsApp(App):
     SCREENS = {"main": MainScreen}
 
     def on_mount(self) -> None:
-        self.install_screen(MainScreen(), "main")
         self.push_screen("main")
 
     def on_key(self, event):
