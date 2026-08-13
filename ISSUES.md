@@ -1,7 +1,8 @@
 # Issues
 
 ## llama.cpp `/metrics` endpoint returns 400 error
-- **Status**: Open
-- **Description**: O endpoint `/metrics` do llama.cpp retorna `{"error":{"code":400,"message":"model name is missing from the request","type":"invalid_request_error"}}` mesmo com o flag `--metrics` presente no comando.
-- **Impact**: A TUI (e qualquer scraper Prometheus) não consegue coletar métricas.
-- **Notas**: A imagem `ghcr.io/ggml-org/llama.cpp:server-vulkan` pode estar usando uma versão onde o flag `--metrics` não foi integralmente implementado ou requer configuração adicional.
+- **Status**: ✅ RESOLVIDO
+- **Descrição original**: O endpoint `/metrics` do llama.cpp retornava 400 com a mensagem "model name is missing from the request"
+- **Causa**: O endpoint /metrics do proxy llama-server (porta 8080) exige o parâmetro `?model=<id>` para saber qual modelo interno consultar
+- **Solução**: Adicionado `_get_model_param()` no TUI que appenda `?model=...` à URL. Também suporta variável `LLAMA_MODEL` para customização
+- **Notas**: Todos os metrics agora funcionam corretamente: prompt_tps, gen_tps, cache hit rate (spec_decode acceptance), timestamps, etc.
