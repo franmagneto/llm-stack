@@ -8,8 +8,7 @@ services:
     volumes:
       - ${MODELS_DIR:?Set MODELS_DIR in .env}:/models:ro
     environment:
-      - LLAMA_CACHE: /models
-      - LLAMA_ARG_ENDPOINT_METRICS: "true"
+      LLAMA_CACHE: /models
     command: >
       --models-preset /models/models.ini
       --no-models-autoload
