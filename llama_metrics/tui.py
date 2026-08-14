@@ -246,12 +246,14 @@ class DashboardView(Static):
         gt = snap.gen_tps
 
         self._prompt_label.update(f"  Prompt tokens/s:   {self._fmt(pt, '.1f')}")
-        self._cache_label.update(f"  Cache hit ratio:   {self._fmt(ct, '.1f') if ct is not None else '---'} %")
-        self._sample_label.update(f"  Gen tokens/s:      {self._fmt(gt, '.4f')}")
+        self._cache_label.update(f"  Cache hit ratio:   {self._fmt(ct, '.1f')} %")
+        self._sample_label.update(f"  Gen tokens/s:      {self._fmt(gt, '.1f')}")
 
         # Color coding for TPS
-        self._prompt_label.add_class("value-good" if (pt and pt > 8) else "value-slow" if pt and pt < 3 else "")
-        self._sample_label.add_class("value-good" if (gt and gt > 0.5) else "value-slow" if gt and gt < 0.1 else "")
+        if pt is not None:
+            self._prompt_label.add_class("value-good" if pt > 8 else "value-slow")
+        if gt is not None:
+            self._sample_label.add_class("value-good" if gt > 0.5 else "value-slow")
 
         pd = snap.prompt_duration_ms
         td = snap.gen_duration_ms
