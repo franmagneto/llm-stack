@@ -4,10 +4,8 @@ version = 1
 c = 65536
 threads = 8
 fa = on
-ctk = q8_0
-ctv = q8_0
-ctkd = q8_0
-ctvd = q8_0
+cache-type-k = q8_0
+cache-type-v = q8_0
 ctxcp = 64
 batch-size = 2048
 ubatch-size = 2048
@@ -18,7 +16,7 @@ image-min-tokens = 1024
 min-p = 0.00
 spec-type = draft-mtp
 spec-draft-n-max = 3
-spec-draft-p-min = 0.8
+spec-draft-p-min = 0.5
 
 ; [unsloth/gemma-4-26B-A4B-it-qat-GGUF:Q4_K_XL]
 ; spec-type = draft-mtp

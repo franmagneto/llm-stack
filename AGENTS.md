@@ -65,16 +65,9 @@ Variáveis de ambiente opcionais:
 ✅ **Config** — `LLAMA_CACHE=/models`, `MODELS_DIR` obrigatório via `.env`
 ✅ **Docs** — `.env.example` e `README.md` atualizados
 ✅ **Validação** — `podman compose config` passa; CLI funciona contra container Vulkan
-
-## Notas técnicas
-
-- Router usa `--models-preset /models/models.ini` para carregar presets de `models.ini`
-- `--no-models-autoload` impede carregamento automático; modelo default pode ser explicitamente marcado com `auto-load-model = true` no preset para iniciar carregado
-- Open WebUI conecta via API compatível com OpenAI em `http://llama-server:8080/v1`
-- `ENABLE_OLLAMA_API=false` desabilita o backend Ollama integrado
+✅ **Auto-load** — `start-llama.sh` com `LLAMA_AUTO_LOAD_MODEL=true` (compose)
+✅ **Healthcheck** — `/health` via curl, 30s interval, 3 retries
 
 ## Próximos Passos
 
 1. Testar carregamento/descarregamento com o modelo default em produção
-2. Experimentar `auto-load-model = true` se desejar modelo pronto ao iniciar
-3. Adicionarhealth check ao llama-server

@@ -7,15 +7,27 @@ services:
       - "8080:8080"
     volumes:
       - ${MODELS_DIR:?Set MODELS_DIR in .env}:/models:ro
+      - ./start-llama.sh:/start-llama.sh:ro
     environment:
       LLAMA_CACHE: /models
-    command: >
-      --models-preset /models/models.ini
-      --no-models-autoload
-      --jinja
-      --host 0.0.0.0
-      --port 8080
-      --metrics
+      LLAMA_MODEL: unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M
+      LLAMA_AUTO_LOAD_MODEL: "true"
+    entrypoint: ["/start-llama.sh"]
+    command:
+      - --models-preset
+      - /models/models.ini
+      - --no-models-autoload
+      - --jinja
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --metrics
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main-slim
