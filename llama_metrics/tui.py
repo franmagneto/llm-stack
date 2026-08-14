@@ -37,16 +37,17 @@ class ModelStatus:
     id: str = ""
     value: str = "unknown"
 
-    def display(self) -> str:
+    def display(self) -> tuple[str, str]:
+        """Returns (icon, text, css_class) for model status."""
         if self.value == "loaded":
-            return f"● {self.id}"
-        elif self.value == "unloading":
-            return f"◼ Unloading"
-        elif self.value == "loading":
-            return f"◻ Loading"
+            return ("●", f"{self.id}", "value-good")
+        elif self.value == "unloading" or self.value == "loading":
+            return ("◻", self.value, "value-warning")
         elif self.value == "error":
-            return f"✖ Error"
-        return f"○ {self.id}"
+            return ("✖", "error", "value-slow")
+        elif self.value == "unloaded":
+            return ("○", "unloaded", "value-slow")
+        return ("?", "unknown", "value-slow")
 
 
 @dataclass
@@ -246,6 +247,11 @@ class DashboardView(Static):
         text-style: bold;
     }
 
+    .value-warning {
+        color: yellow;
+        text-style: bold;
+    }
+
     .status-connected {
         color: $accent;
         text-style: bold;
@@ -305,29 +311,25 @@ class DashboardView(Static):
     def update(self, snap: MetricSnapshot | None):
         """Atualiza todos os labels com o snapshot."""
         # Model status always first (before _set_all which resets all labels)
-        if snap is None:
-            self._model_label.update("  Model:   Unknown")
+        if snap is None or not snap.model_status:
+            self._model_label.update("  Model:   ? unknown")
             self._model_label.remove_class("value-good", "value-slow")
             self._set_all("---")
             return
 
         # Model status
-        if snap.model_status:
-            ms = snap.model_status
+        ms = snap.model_status
+        if ms:
+            icon, text, cls = ms.display()
             if ms.value == "loaded":
-                self._model_label.update(f"  Model:   {ms.id}")
-                self._model_label.remove_class("value-slow")
-                self._model_label.add_class("value-good")
-            elif ms.value == "error":
-                self._model_label.update("  Model:   Error loading")
-                self._model_label.remove_class("value-good")
-                self._model_label.add_class("value-slow")
+                self._model_label.update(f"  Model:   {icon} {ms.id}")
             else:
-                self._model_label.update(f"  Model:   {ms.value}")
-                self._model_label.remove_class("value-good", "value-slow")
+                self._model_label.update(f"  Model:   {icon} {text}")
+            self._model_label.remove_class("value-good", "value-slow", "value-warning")
+            self._model_label.add_class(cls)
         else:
-            self._model_label.update("  Model:   Connecting...")
-            self._model_label.remove_class("value-good", "value-slow")
+            self._model_label.update("  Model:   ? unknown")
+            self._model_label.remove_class("value-good", "value-slow", "value-warning")
 
         pt = snap.prompt_tps
         ct = snap.pct_cached
