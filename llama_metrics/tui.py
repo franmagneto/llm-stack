@@ -33,6 +33,10 @@ def _get_model_param() -> str:
 
 @dataclass
 class MetricSnapshot:
+    prompt_tps: float | None = None
+
+    gen_tps: float | None = None
+
     prompt_tps_avg: float | None = None
 
     gen_tps_avg: float | None = None
