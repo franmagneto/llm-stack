@@ -66,7 +66,7 @@ class MetricsClient:
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             return None
 
-        from .client import (
+        from client import (
             parse_prometheus_text,
             get_context_tps,
             get_sampling_tps,
@@ -348,7 +348,7 @@ class HistoryChart(Static):
         self._canvas.update(text)
 
 
-class MainScreen(Screen):
+class     MainScreen(Screen):
     """Tela principal do dashboard."""
 
     CSS = """
@@ -373,11 +373,25 @@ class MainScreen(Screen):
         margin-bottom: 1;
     }
 
-    #bottom-row {
+    #footer-info {
+        dock: bottom;
+        height: 4;
+        width: 100%;
+        padding: 0 2;
+        background: #1a1b26;
+    }
+
+    #chart-row {
+        dock: bottom;
         height: 10;
         width: 100%;
-        dock: bottom;
-        margin-bottom: 1;
+        margin-bottom: 5;
+    }
+
+    .hint-text {
+        color: #556677;
+        text-style: dim;
+        margin-left: 1;
     }
 
     .status-connected {
@@ -401,8 +415,22 @@ class MainScreen(Screen):
 
         with Container(id="main-content"):
             yield DashboardView(id="dashboard")
-        with Container(id="bottom-row"):
+        with Container(id="chart-row"):
             yield HistoryChart(id="chart")
+
+        with Container(id="footer-info"):
+            yield Label(
+                "  ▶  Run:  podman run --rm -it --network host llama-metrics-tui",
+                classes="hint-text",
+            )
+            yield Label(
+                "  ▶  Model env:  LLAMA_MODEL=qwen  podman run -e LLAMA_MODEL=qwen ...",
+                classes="hint-text",
+            )
+            yield Label(
+                "  Press q or Ctrl + D to exit",
+                classes="hint-text",
+            )
 
         yield Footer()
 
