@@ -18,6 +18,7 @@ from textual.widgets import Footer, Header, Label, Static, TabbedContent, Tabs
 
 # Defaults
 DEFAULT_URL = "http://localhost:8080/metrics"
+DEFAULT_MODELS_URL = "http://localhost:8080/models"
 POLL_INTERVAL = 2  # seconds
 MAX_HISTORY = 30
 
@@ -32,7 +33,25 @@ def _get_model_param() -> str:
 
 
 @dataclass
+class ModelStatus:
+    id: str = ""
+    value: str = "unknown"
+
+    def display(self) -> str:
+        if self.value == "loaded":
+            return f"● {self.id}"
+        elif self.value == "unloading":
+            return f"◼ Unloading"
+        elif self.value == "loading":
+            return f"◻ Loading"
+        elif self.value == "error":
+            return f"✖ Error"
+        return f"○ {self.id}"
+
+
+@dataclass
 class MetricSnapshot:
+    model_status: ModelStatus | None = None
     prompt_tps: float | None = None
 
     gen_tps: float | None = None
@@ -58,18 +77,44 @@ class MetricSnapshot:
 class MetricsClient:
     """Busca e parseia métricas do llama.cpp via /metrics."""
 
-    def __init__(self, url: str = DEFAULT_URL):
+    def __init__(self, url: str = DEFAULT_URL, models_url: str = DEFAULT_MODELS_URL):
         self.url = url
+        self.models_url = models_url
         self.raw_data: dict = {}
 
+    def poll_model_status(self) -> ModelStatus:
+        """Busca status do modelo via /models."""
+        try:
+            req = urllib.request.Request(self.models_url)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            models = data.get("data", [])
+            target_model = _get_model_param().split("=")[-1]
+
+            for m in models:
+                if m.get("id") == target_model or any(alias == target_model for alias in m.get("aliases", [])):
+                    return ModelStatus(id=m.get("id", ""), value=m.get("status", {}).get("value", "unknown"))
+
+            if models:
+                m = models[0]
+                return ModelStatus(id=m.get("id", ""), value=m.get("status", {}).get("value", "unknown"))
+
+            return ModelStatus(value="unknown")
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError, json.JSONDecodeError):
+            return ModelStatus(value="unknown")
+
     def poll(self) -> MetricSnapshot | None:
+        # Grab model status early — always available even when model is unloaded
+        model_status = self.poll_model_status()
+
         try:
             url = f"{self.url}{_get_model_param()}"
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=3) as resp:
                 raw = resp.read().decode("utf-8")
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-            return None
+            return MetricSnapshot(model_status=model_status)
 
         from client import (
             parse_prometheus_text,
@@ -94,6 +139,7 @@ class MetricsClient:
         pct_cached = get_cache_hit_pct(metrics)
 
         return MetricSnapshot(
+            model_status=model_status,
             prompt_tps=get_prompt_tps(metrics),
             gen_tps=get_gen_tps(metrics),
             prompt_duration_ms=get_prompt_duration_s(metrics),
@@ -140,6 +186,11 @@ class DashboardView(Static):
         width: 100%;
     }
 
+    #model-status {
+        background: $boost;
+        height: 3;
+    }
+
     .metric-row {
         height: 3;
         border: solid cyan;
@@ -158,6 +209,7 @@ class DashboardView(Static):
     #inference-tokens {
         background: $boost;
         height: 12;
+        margin-top: 1;
     }
 
     #timing-volume {
@@ -193,9 +245,24 @@ class DashboardView(Static):
         color: red;
         text-style: bold;
     }
+
+    .status-connected {
+        color: $accent;
+        text-style: bold;
+    }
+
+    .status-disconnected {
+        color: red;
+        text-style: bold;
+    }
     """
 
     def compose(self) -> ComposeResult:
+        with Vertical(id="model-status"):
+            yield Label("Model", classes="metric-title")
+            self._model_label = Label("  ● Loading...", classes="metric-text")
+            yield self._model_label
+
         with Vertical(id="inference-tokens"):
             yield Label("Tokens/s", classes="metric-title")
             self._prompt_label = Label("  Prompt tokens/s:  ---", classes="metric-text")
@@ -237,9 +304,30 @@ class DashboardView(Static):
 
     def update(self, snap: MetricSnapshot | None):
         """Atualiza todos os labels com o snapshot."""
+        # Model status always first (before _set_all which resets all labels)
         if snap is None:
+            self._model_label.update("  Model:   Unknown")
+            self._model_label.remove_class("value-good", "value-slow")
             self._set_all("---")
             return
+
+        # Model status
+        if snap.model_status:
+            ms = snap.model_status
+            if ms.value == "loaded":
+                self._model_label.update(f"  Model:   {ms.id}")
+                self._model_label.remove_class("value-slow")
+                self._model_label.add_class("value-good")
+            elif ms.value == "error":
+                self._model_label.update("  Model:   Error loading")
+                self._model_label.remove_class("value-good")
+                self._model_label.add_class("value-slow")
+            else:
+                self._model_label.update(f"  Model:   {ms.value}")
+                self._model_label.remove_class("value-good", "value-slow")
+        else:
+            self._model_label.update("  Model:   Connecting...")
+            self._model_label.remove_class("value-good", "value-slow")
 
         pt = snap.prompt_tps
         ct = snap.pct_cached
@@ -278,10 +366,10 @@ class DashboardView(Static):
 
     def _set_all(self, val: str):
         for label in [self._prompt_label, self._cache_label, self._sample_label,
-                      self._prompt_dur, self._token_dur,
-                      self._total_tokens, self._total_prompts, self._total_samples,
-                       self._prompt_tps, self._gen_tps,
-                      self._cached, self._pred, self._active_ctx]:
+                       self._prompt_dur, self._token_dur,
+                       self._total_tokens, self._total_prompts, self._total_samples,
+                        self._prompt_tps, self._gen_tps,
+                       self._cached, self._pred, self._active_ctx, self._model_label]:
             parts = label.plain.split(":")
             label_text = f"  {parts[0]}: {val}" if len(parts) > 1 else label.plain
             label.update(label_text)
@@ -376,7 +464,7 @@ class     MainScreen(Screen):
     #main-content {
         width: 100%;
         height: 100%;
-        margin-top: 1;
+        margin-top: 2;
         margin-bottom: 1;
     }
 
@@ -467,12 +555,13 @@ class     MainScreen(Screen):
         self._connect_attempts += 1
 
         snap = self.get_metrics()
-        if snap:
-            dash = self.query_one("#dashboard", DashboardView)
-            dash.update(snap)
+        dash = self.query_one("#dashboard", DashboardView)
+        dash.update(snap)
 
+        if snap:
             chart = self.query_one("#chart", HistoryChart)
-            chart.add_point(snap.prompt_tps, snap.pct_cached, snap.gen_tps)
+            if snap.prompt_tps is not None or snap.gen_tps is not None:
+                chart.add_point(snap.prompt_tps, snap.pct_cached, snap.gen_tps)
 
             self._status.update("● Connected")
             self._status.remove_class("status-disconnected")
