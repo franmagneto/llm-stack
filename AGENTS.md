@@ -70,4 +70,4 @@ Variáveis de ambiente opcionais:
 
 ## Próximos Passos
 
-1. Testar carregamento/descarregamento com o modelo default em produção
+✅ **Auto-load** — testado em produção com sucesso
