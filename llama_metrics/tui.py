@@ -34,7 +34,13 @@ def _get_model_param() -> str:
 @dataclass
 class MetricSnapshot:
     prompt_tps: float | None = None
+
     gen_tps: float | None = None
+
+    prompt_tps_avg: float | None = None
+
+    gen_tps_avg: float | None = None
+
     prompt_duration_ms: float | None = None
     gen_duration_ms: float | None = None
     total_prompt_tokens: int = 0
@@ -45,8 +51,7 @@ class MetricSnapshot:
     n_tokens_pred: int = 0
     n_context: int = 0
     pct_cached: float | None = None
-    prompt_p50: float | None = None
-    gen_p50: float | None = None
+
     raw: dict = field(default_factory=dict)
 
 
@@ -66,7 +71,7 @@ class MetricsClient:
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             return None
 
-        from .client import (
+        from client import (
             parse_prometheus_text,
             get_context_tps,
             get_sampling_tps,
@@ -78,8 +83,8 @@ class MetricsClient:
             get_n_tokens_cached,
             get_n_tokens_pred,
             get_n_context,
-            get_prompt_tokens_seconds_p50,
-            get_generation_tokens_seconds_p50,
+            get_prompt_tps,
+            get_gen_tps,
             get_cache_hit_pct,
         )
 
@@ -89,8 +94,8 @@ class MetricsClient:
         pct_cached = get_cache_hit_pct(metrics)
 
         return MetricSnapshot(
-            prompt_tps=get_context_tps(metrics),
-            gen_tps=get_sampling_tps(metrics),
+            prompt_tps=get_prompt_tps(metrics),
+            gen_tps=get_gen_tps(metrics),
             prompt_duration_ms=get_prompt_duration_s(metrics),
             gen_duration_ms=get_gen_duration_s(metrics),
             total_prompt_tokens=get_total_prompt_tokens(metrics),
@@ -101,8 +106,8 @@ class MetricsClient:
             n_tokens_pred=get_n_tokens_pred(metrics),
             n_context=get_n_context(metrics),
             pct_cached=pct_cached,
-            prompt_p50=get_prompt_tokens_seconds_p50(metrics),
-            gen_p50=get_generation_tokens_seconds_p50(metrics),
+            prompt_tps_avg=get_context_tps(metrics),
+            gen_tps_avg=get_sampling_tps(metrics),
             raw=metrics,
         )
 
@@ -162,7 +167,7 @@ class DashboardView(Static):
         margin-right: 1;
     }
 
-    #percentiles {
+    #throughput {
         background: $boost;
         min-width: 20;
         height: 15;
@@ -214,12 +219,12 @@ class DashboardView(Static):
                 yield self._total_prompts
                 yield self._total_samples
 
-            with Vertical(id="percentiles"):
-                yield Label("P50 (Histograms)", classes="metric-title")
-                self._prompt_p50 = Label("  Prompt P50 tokens/s: ---", classes="metric-text")
-                self._gen_p50 = Label("  Gen P50 tokens/s:    ---", classes="metric-text")
-                yield self._prompt_p50
-                yield self._gen_p50
+            with Vertical(id="throughput"):
+                yield Label("Throughput", classes="metric-title")
+                self._prompt_tps = Label("  Prompt avg TPS:   ---", classes="metric-text")
+                self._gen_tps = Label("  Gen avg TPS:      ---", classes="metric-text")
+                yield self._prompt_tps
+                yield self._gen_tps
 
         with Vertical(id="cache-info"):
             yield Label("Cache & Context", classes="metric-title")
@@ -241,12 +246,14 @@ class DashboardView(Static):
         gt = snap.gen_tps
 
         self._prompt_label.update(f"  Prompt tokens/s:   {self._fmt(pt, '.1f')}")
-        self._cache_label.update(f"  Cache hit ratio:   {self._fmt(ct, '.1f') if ct is not None else '---'} %")
-        self._sample_label.update(f"  Gen tokens/s:      {self._fmt(gt, '.4f')}")
+        self._cache_label.update(f"  Cache hit ratio:   {self._fmt(ct, '.1f')} %")
+        self._sample_label.update(f"  Gen tokens/s:      {self._fmt(gt, '.1f')}")
 
         # Color coding for TPS
-        self._prompt_label.add_class("value-good" if (pt and pt > 8) else "value-slow" if pt and pt < 3 else "")
-        self._sample_label.add_class("value-good" if (gt and gt > 0.5) else "value-slow" if gt and gt < 0.1 else "")
+        if pt is not None:
+            self._prompt_label.add_class("value-good" if pt > 8 else "value-slow")
+        if gt is not None:
+            self._sample_label.add_class("value-good" if gt > 0.5 else "value-slow")
 
         pd = snap.prompt_duration_ms
         td = snap.gen_duration_ms
@@ -257,8 +264,8 @@ class DashboardView(Static):
         self._total_prompts.update(f"  Total prompts:     {snap.total_prompts:>10,}")
         self._total_samples.update(f"  Total generated:   {snap.total_generated_tokens:>10,}")
 
-        self._prompt_p50.update(f"  Prompt P50 tokens/s: {self._fmt(snap.prompt_p50, '.1f')}")
-        self._gen_p50.update(f"  Gen P50 tokens/s:    {self._fmt(snap.gen_p50, '.1f')}")
+        self._prompt_tps.update(f"  Prompt avg TPS:   {self._fmt(snap.prompt_tps_avg, '.1f')}")
+        self._gen_tps.update(f"  Gen avg TPS:      {self._fmt(snap.gen_tps_avg, '.1f')}")
 
         self._cached.update(f"  Cached tokens:   {snap.n_tokens_cached:>10,}")
         self._pred.update(f"  Predicted:        {snap.n_tokens_pred:>10,}")
@@ -273,7 +280,7 @@ class DashboardView(Static):
         for label in [self._prompt_label, self._cache_label, self._sample_label,
                       self._prompt_dur, self._token_dur,
                       self._total_tokens, self._total_prompts, self._total_samples,
-                      self._prompt_p50, self._gen_p50,
+                       self._prompt_tps, self._gen_tps,
                       self._cached, self._pred, self._active_ctx]:
             parts = label.plain.split(":")
             label_text = f"  {parts[0]}: {val}" if len(parts) > 1 else label.plain
@@ -348,7 +355,7 @@ class HistoryChart(Static):
         self._canvas.update(text)
 
 
-class MainScreen(Screen):
+class     MainScreen(Screen):
     """Tela principal do dashboard."""
 
     CSS = """
@@ -373,11 +380,25 @@ class MainScreen(Screen):
         margin-bottom: 1;
     }
 
-    #bottom-row {
+    #footer-info {
+        dock: bottom;
+        height: 4;
+        width: 100%;
+        padding: 0 2;
+        background: #1a1b26;
+    }
+
+    #chart-row {
+        dock: bottom;
         height: 10;
         width: 100%;
-        dock: bottom;
-        margin-bottom: 1;
+        margin-bottom: 5;
+    }
+
+    .hint-text {
+        color: #556677;
+        text-style: dim;
+        margin-left: 1;
     }
 
     .status-connected {
@@ -401,8 +422,22 @@ class MainScreen(Screen):
 
         with Container(id="main-content"):
             yield DashboardView(id="dashboard")
-        with Container(id="bottom-row"):
+        with Container(id="chart-row"):
             yield HistoryChart(id="chart")
+
+        with Container(id="footer-info"):
+            yield Label(
+                "  ▶  Run:  podman run --rm -it --network host llama-metrics-tui",
+                classes="hint-text",
+            )
+            yield Label(
+                "  ▶  Model env:  LLAMA_MODEL=qwen  podman run -e LLAMA_MODEL=qwen ...",
+                classes="hint-text",
+            )
+            yield Label(
+                "  Press q or Ctrl + D to exit",
+                classes="hint-text",
+            )
 
         yield Footer()
 

@@ -293,18 +293,18 @@ def get_n_context(metrics: Metrics) -> int:
     return 0
 
 
-def get_prompt_tokens_seconds_p50(metrics: Metrics) -> float | None:
-    """Valor atual do gauge prompt_tokens_seconds (tps mediano aproximado)."""
+def get_prompt_tps(metrics: Metrics) -> float | None:
+    """Vazamento médio de prompt (tokens/s) — gauge do llama.cpp."""
     val = metrics.get("llamacpp:prompt_tokens_seconds")
-    if isinstance(val, UntypedMetric) and val.value > 0:
+    if isinstance(val, CounterMetric) and val.value > 0:
         return val.value
     return None
 
 
-def get_generation_tokens_seconds_p50(metrics: Metrics) -> float | None:
-    """Valor atual do gauge predicted_tokens_seconds (tps mediano aproximado)."""
+def get_gen_tps(metrics: Metrics) -> float | None:
+    """Vazamento médio de geração (tokens/s) — gauge do llama.cpp."""
     val = metrics.get("llamacpp:predicted_tokens_seconds")
-    if isinstance(val, UntypedMetric) and val.value > 0:
+    if isinstance(val, CounterMetric) and val.value > 0:
         return val.value
     return None
 
