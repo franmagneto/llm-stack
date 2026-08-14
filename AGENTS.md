@@ -16,7 +16,7 @@ Podman Compose · `ghcr.io/ggml-org/llama.cpp:server-vulkan` · `ghcr.io/open-we
 
 Branch principal: `main`. `initial` = branch da especificação.
 
-Fluxo: `git checkout -b feature/<nome> main` → commits → `git rebase main` → `git checkout main && git merge feature/<nome> --no-ff` → `git branch -d feature/<nome>`
+Fluxo: `git checkout -b feature/<nome> main` → edits → `git add -A && git status` → commits → `git rebase main` → `git checkout main && git merge feature/<nome> --no-ff` → `git branch -d feature/<nome>`
 
 Commits: **Conventional Commits** (`feat(scope): description`).
 
