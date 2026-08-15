@@ -354,8 +354,8 @@ class DashboardView(Static):
         if gt is not None:
             self._sample_label.add_class("value-good" if gt > 0.5 else "value-slow")
 
-        pd = snap.prompt_duration_ms
-        td = snap.gen_duration_ms
+        pd = snap.prompt_duration_ms / 1000 if snap.prompt_duration_ms else None
+        td = snap.gen_duration_ms / 1000 if snap.gen_duration_ms else None
 
         self._prompt_dur.update(f"  Prompt duration:   {self._fmt(pd, '5.2f')} s")
         self._token_dur.update(f"  Gen duration:      {self._fmt(td, '5.2f')} s")
