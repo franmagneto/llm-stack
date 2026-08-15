@@ -49,6 +49,7 @@ services:
     build:
       context: .
       dockerfile: llama_metrics/Containerfile
+    profiles: ["metrics"]
     stdin_open: true
     tty: true
     volumes:
