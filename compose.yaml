@@ -35,10 +35,10 @@ services:
     ports:
       - "3000:8080"
     environment:
-      - ENABLE_OLLAMA_API=false
-      - OPENAI_API_BASE_URL=http://llama-server:8080/v1
-      - OPENAI_API_KEY=llama-server
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URL: http://llama-server:8080/v1
+      OPENAI_API_KEY: llama-server
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
     volumes:
       - open-webui-data:/app/backend/data
     depends_on:
@@ -56,8 +56,8 @@ services:
       - llama-logs:/var/log/llama:ro
       - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:ro
     environment:
-      - LLAMA_MODEL=${LLAMA_MODEL:-unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M}
-      - LLAMA_API_URL=http://llama-server:8080
+      LLAMA_MODEL: ${LLAMA_MODEL:-unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M}
+      LLAMA_API_URL: http://llama-server:8080
     depends_on:
       - llama-server
 
