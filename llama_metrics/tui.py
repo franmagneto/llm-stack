@@ -17,10 +17,9 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, Static, TabbedContent, Tabs
 
-from log_parser import (
+from .log_parser import (
     LogEntry,
     MetricsAccumulator,
-    get_prompt_tps_from_entry,
 )
 
 
@@ -156,29 +155,31 @@ class LogTailer:
             return MetricSnapshot(model_status=model_status)
 
         # Processar linhas no accumulator para construir LogEntry completo
+        response_entry = None
         for line in lines:
             result = self._accumulator.process_line(line)
-            if result is not None:
-                # Construir MetricSnapshot a partir do LogEntry
-                snap = MetricSnapshot(
-                    model_status=model_status,
-                    prompt_tps=result.prompt_tps,
-                    gen_tps=result.gen_tps,
-                    prompt_duration_ms=result.prompt_duration_ms,
-                    gen_duration_ms=result.gen_duration_ms,
-                    total_prompt_tokens=result.prompt_tokens,
-                    total_generated_tokens=result.gen_tokens,
-                    total_prompts=result.total_tokens,  # total tokens = prompts+gen para última resposta
-                    total_samples=result.gen_tokens,
-                    n_context=0,
-                    gen_tps_avg=result.gen_tps,
-                    prompt_tps_avg=result.prompt_tps,
-                    _entry=result,
-                )
-                return snap
+            if result is not None and result.type == "total":
+                response_entry = result
 
-        # Se não há resposta completa, usa a linha mais recente (durante geração)
-        # Usa acumulador para extrair gen_tps atual
+        if response_entry:
+            snap = MetricSnapshot(
+                model_status=model_status,
+                prompt_tps=response_entry.prompt_tps,
+                gen_tps=response_entry.gen_tps,
+                prompt_duration_ms=response_entry.prompt_duration_ms,
+                gen_duration_ms=response_entry.gen_duration_ms,
+                total_prompt_tokens=response_entry.prompt_tokens,
+                total_generated_tokens=response_entry.gen_tokens,
+                total_prompts=response_entry.prompt_tokens,
+                total_samples=response_entry.gen_tokens,
+                n_context=0,
+                gen_tps_avg=response_entry.gen_tps,
+                prompt_tps_avg=response_entry.prompt_tps,
+                _entry=response_entry,
+            )
+            return snap
+
+        # Se não há resposta completa, usa gen_tps atual do acumulador
         snap = MetricSnapshot(
             model_status=model_status,
             prompt_tps=self._accumulator.prompt_tps,

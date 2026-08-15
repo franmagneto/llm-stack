@@ -16,14 +16,19 @@ from dataclasses import dataclass, field
 @dataclass
 class LogEntry:
     """Uma única entrada de métrica extraída de uma linha de log."""
+    type: str = ""  # prompt_tokens, prompt_eval, eval, total, tps
     prompt_tokens: int = 0
     gen_tokens: int = 0
     total_tokens: int = 0
+    duration_ms: float | None = None
+    tokens: int = 0
     prompt_duration_ms: float | None = None
     gen_duration_ms: float | None = None
     prompt_tps: float | None = None
     gen_tps: float | None = None
     tg_3s: float | None = None
+    count: int = 0
+    n_gen: int = 0
     is_response: bool = False  # True se vem de linha de resposta (prompt/eval/total time)
 
     @property
@@ -98,11 +103,15 @@ class MetricsAccumulator:
         """Processa uma linha de log. Retorna LogEntry quando uma resposta completa é detectada."""
         stripped = line.strip()
 
-        # Line: "processing prompt tokens: N" ou similar — extrai prompt tokens
+        # Line: "processing prompt tokens: N" — inicia nova resposta
         m = RESPONSE_START_RE.search(stripped)
         if m:
             self._accumulated_prompt_tokens = int(m.group(1))
-            return None
+            # Retorna LogEntry para tracking de prompt_tokens
+            return LogEntry(
+                type="prompt_tokens",
+                count=int(m.group(1)),
+            )
 
         # Line: "prompt eval time = ..."
         m = PROMPT_EVAL_RE.search(stripped)
@@ -112,17 +121,28 @@ class MetricsAccumulator:
             self.prompt_tokens = prompt_token_count
             # Extrair prompt TPS das parenteses se presentes
             # "(  24.69 ms per token,    40.48 tokens per second)"
-            tps_match = re.search(r'\((?:[\d.]+)\s+ms per token,\s*([\d.]+)\s+tokens per second\)', stripped)
+            tps_match = re.search(r'(\d+\.\d+)\s+tokens per second', stripped)
             if tps_match:
                 self.prompt_tps = float(tps_match.group(1))
-            return None
+            return LogEntry(
+                type="prompt_eval",
+                prompt_tokens=prompt_token_count,
+                prompt_duration_ms=self.prompt_duration_ms,
+                prompt_tps=self.prompt_tps,
+                is_response=True,
+            )
 
         # Line: "   eval time = ..." (gen tokens)
         m = EVAL_TIME_RE.search(stripped)
         if m:
             self.gen_duration_ms = float(m.group(1))
             self.gen_tokens = int(m.group(2))
-            return None
+            return LogEntry(
+                type="eval",
+                gen_tokens=int(m.group(2)),
+                gen_duration_ms=float(m.group(1)),
+                is_response=True,
+            )
 
         # Line: "  total time = ..."
         m = TOTAL_TIME_RE.search(stripped)
@@ -138,9 +158,14 @@ class MetricsAccumulator:
             self.total_tokens = total_token_count
 
             # Construir e limpar o último LogEntry
+            # Usa _accumulated_prompt_tokens se prompt_tokens não foi capturado
+            actual_prompt_tokens = self._accumulated_prompt_tokens if self._accumulated_prompt_tokens > 0 else self.prompt_tokens
+            actual_gen_tokens = max(total_token_count - actual_prompt_tokens, 0) if self.gen_tokens == 0 else self.gen_tokens
+
             entry = LogEntry(
-                prompt_tokens=self.prompt_tokens,
-                gen_tokens=self.gen_tokens,
+                type="total",
+                prompt_tokens=actual_prompt_tokens,
+                gen_tokens=actual_gen_tokens,
                 total_tokens=self.total_tokens,
                 prompt_duration_ms=self.prompt_duration_ms,
                 gen_duration_ms=self.gen_duration_ms,
@@ -156,7 +181,12 @@ class MetricsAccumulator:
         if m:
             self.gen_tps = float(m.group(2))
             self.tg_3s = float(m.group(3)) if m.group(3) else None
-            return None
+            return LogEntry(
+                type="tps",
+                gen_tps=self.gen_tps,
+                tg_3s=self.tg_3s,
+                n_gen=int(m.group(1)),
+            )
 
         return None
 
