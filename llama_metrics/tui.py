@@ -1,13 +1,15 @@
-"""Dashboard TUI para métricas do llama.cpp."""
+"""Dashboard TUI para métricas do llama.cpp — baseado em logs do servidor."""
 
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
@@ -15,17 +17,21 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, Static, TabbedContent, Tabs
 
+from .log_parser import (
+    LogEntry,
+    MetricsAccumulator,
+)
+
 
 # Defaults
-DEFAULT_URL = "http://localhost:8080/metrics"
 DEFAULT_MODELS_URL = "http://localhost:8080/models"
-POLL_INTERVAL = 2  # seconds
+POLL_INTERVAL = 3  # seconds — aligned with llama.cpp hardcoded 3s TPS log interval
 MAX_HISTORY = 30
+DEFAULT_LOG_PATH = "/var/log/llama/server.log"
 
 
 def _get_model_param() -> str:
     """Retorna o parâmetro de modelo para o endpoint /metrics."""
-    import os
     model = os.getenv("LLAMA_MODEL")
     if model:
         return f"?model={model}"
@@ -67,21 +73,18 @@ class MetricSnapshot:
     total_generated_tokens: int = 0
     total_prompts: int = 0
     total_samples: int = 0
-    n_tokens_cached: int = 0
-    n_tokens_pred: int = 0
     n_context: int = 0
-    pct_cached: float | None = None
-
     raw: dict = field(default_factory=dict)
+    _entry: LogEntry | None = field(default=None, repr=False)
 
 
 class MetricsClient:
-    """Busca e parseia métricas do llama.cpp via /metrics."""
+    """Busca status do modelo via /models. Métricas vêm do log via LogTailer."""
 
-    def __init__(self, url: str = DEFAULT_URL, models_url: str = DEFAULT_MODELS_URL):
-        self.url = url
-        self.models_url = models_url
-        self.raw_data: dict = {}
+    def __init__(self, models_url: str | None = None):
+        api_base = os.getenv("LLAMA_API_URL", "http://localhost:8080")
+        self.models_url = models_url or f"{api_base}/models"
+        self._api_base = f"{api_base}/v1"
 
     def poll_model_status(self) -> ModelStatus:
         """Busca status do modelo via /models."""
@@ -105,76 +108,92 @@ class MetricsClient:
         except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError, json.JSONDecodeError):
             return ModelStatus(value="unknown")
 
-    def poll(self) -> MetricSnapshot | None:
-        # Grab model status early — always available even when model is unloaded
-        model_status = self.poll_model_status()
 
+class LogTailer:
+    """Lê novas linhas do log file do llama-server, mantém posição, parseia métricas."""
+
+    def __init__(self, log_path: str = DEFAULT_LOG_PATH):
+        self.log_path = Path(log_path)
+        self._position = 0
+        self._accumulator = MetricsAccumulator()
+        self._buffer: list[str] = []
+
+    def _open(self):
         try:
-            url = f"{self.url}{_get_model_param()}"
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                raw = resp.read().decode("utf-8")
-        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            self._file = open(self.log_path, "r", encoding="utf-8", errors="replace")
+            self._file.seek(self._position)
+            self._is_open = True
+        except (FileNotFoundError, PermissionError, OSError):
+            self._is_open = False
+
+    def _close(self):
+        if hasattr(self, '_file') and self._is_open:
+            try:
+                self._file.close()
+            except OSError:
+                pass
+            self._is_open = False
+
+    def _read_new_lines(self) -> list[str]:
+        """Leia novas linhas desde a última posição."""
+        if not hasattr(self, '_file') or not self._is_open:
+            self._open()
+            if not self._is_open:
+                return []
+
+        lines = []
+        while True:
+            line = self._file.readline()
+            if not line:
+                break
+            lines.append(line)
+            self._position = self._file.tell()
+        return lines
+
+    def poll(self) -> MetricSnapshot | None:
+        """Lê novas linhas do log, parseia, retorna MetricSnapshot com última entrada completa."""
+        model_status = MetricsClient().poll_model_status()
+
+        lines = self._read_new_lines()
+        if not lines:
             return MetricSnapshot(model_status=model_status)
 
-        from client import (
-            parse_prometheus_text,
-            get_context_tps,
-            get_sampling_tps,
-            get_prompt_duration_s,
-            get_gen_duration_s,
-            get_total_prompt_tokens,
-            get_n_prompt,
-            get_n_pred,
-            get_n_tokens_cached,
-            get_n_tokens_pred,
-            get_n_context,
-            get_prompt_tps,
-            get_gen_tps,
-            get_cache_hit_pct,
-        )
+        # Processar linhas no accumulator para construir LogEntry completo
+        response_entry = None
+        for line in lines:
+            result = self._accumulator.process_line(line)
+            if result is not None and result.type == "total":
+                response_entry = result
 
-        metrics = parse_prometheus_text(raw) or {}
-        self.raw_data = {k: v.value if hasattr(v, "value") else str(v) for k, v in metrics.items()}
+        if response_entry:
+            snap = MetricSnapshot(
+                model_status=model_status,
+                prompt_tps=response_entry.prompt_tps,
+                gen_tps=response_entry.gen_tps,
+                prompt_duration_ms=response_entry.prompt_duration_ms,
+                gen_duration_ms=response_entry.gen_duration_ms,
+                total_prompt_tokens=response_entry.prompt_tokens,
+                total_generated_tokens=response_entry.gen_tokens,
+                total_prompts=response_entry.prompt_tokens,
+                total_samples=response_entry.gen_tokens,
+                n_context=0,
+                gen_tps_avg=response_entry.gen_tps,
+                prompt_tps_avg=response_entry.prompt_tps,
+                _entry=response_entry,
+            )
+            return snap
 
-        pct_cached = get_cache_hit_pct(metrics)
-
-        return MetricSnapshot(
+        # Se não há resposta completa, usa gen_tps atual do acumulador
+        snap = MetricSnapshot(
             model_status=model_status,
-            prompt_tps=get_prompt_tps(metrics),
-            gen_tps=get_gen_tps(metrics),
-            prompt_duration_ms=get_prompt_duration_s(metrics),
-            gen_duration_ms=get_gen_duration_s(metrics),
-            total_prompt_tokens=get_total_prompt_tokens(metrics),
-            total_generated_tokens=get_n_pred(metrics),
-            total_prompts=get_n_prompt(metrics),
-            total_samples=get_n_pred(metrics),
-            n_tokens_cached=get_n_tokens_cached(metrics),
-            n_tokens_pred=get_n_tokens_pred(metrics),
-            n_context=get_n_context(metrics),
-            pct_cached=pct_cached,
-            prompt_tps_avg=get_context_tps(metrics),
-            gen_tps_avg=get_sampling_tps(metrics),
-            raw=metrics,
+            prompt_tps=self._accumulator.prompt_tps,
+            gen_tps=self._accumulator.gen_tps,
+            _entry=None,
         )
+        return snap
 
-
-class MetricBar(Static):
-    """Barra visual de métrica: label + barra + valor."""
-
-    def __init__(self, label: str, value_fmt: str = "", bar_width: int = 20):
-        self._label = label
-        self._value_fmt = value_fmt
-        self._bar_width = bar_width
-        super().__init__()
-
-    def update_display(self, value: float | None, max_value: float | None = None):
-        if value is None:
-            self.update(f"{self._label}: {'---':>12}")
-            return
-
-        formatted = f"{value:>{self._bar_width}.{self._value_fmt}}" if self._value_fmt else f"{value!s:>{self._bar_width}}"
-        self.update(f"{self._label}: {formatted}")
+    def close(self):
+        self._close()
 
 
 class DashboardView(Static):
@@ -209,27 +228,21 @@ class DashboardView(Static):
 
     #inference-tokens {
         background: $boost;
-        height: 12;
+        height: 8;
         margin-top: 1;
     }
 
     #timing-volume {
         background: $boost;
         min-width: 40;
-        height: 15;
+        height: 12;
         margin-right: 1;
     }
 
     #throughput {
         background: $boost;
         min-width: 20;
-        height: 15;
-    }
-
-    #cache-info {
-        background: $boost;
-        margin-top: 1;
-        height: 3;
+        height: 12;
     }
 
     .metric-text {
@@ -271,11 +284,9 @@ class DashboardView(Static):
 
         with Vertical(id="inference-tokens"):
             yield Label("Tokens/s", classes="metric-title")
-            self._prompt_label = Label("  Prompt tokens/s:  ---", classes="metric-text")
-            self._cache_label = Label("  Cache hit ratio:   ---", classes="metric-text")
+            self._prompt_label = Label("  Prompt tokens/s:   ---", classes="metric-text")
             self._sample_label = Label("  Gen tokens/s:      ---", classes="metric-text")
             yield self._prompt_label
-            yield self._cache_label
             yield self._sample_label
 
         with Horizontal():
@@ -299,21 +310,11 @@ class DashboardView(Static):
                 yield self._prompt_tps
                 yield self._gen_tps
 
-        with Vertical(id="cache-info"):
-            yield Label("Cache & Context", classes="metric-title")
-            self._cached = Label("  Cached tokens:  ---", classes="metric-text")
-            self._pred = Label("  Predicted:      ---", classes="metric-text")
-            self._active_ctx = Label("  Active contexts: ---", classes="metric-text")
-            yield self._cached
-            yield self._pred
-            yield self._active_ctx
-
     def update(self, snap: MetricSnapshot | None):
         """Atualiza todos os labels com o snapshot."""
         # Model status always first (before _set_all which resets all labels)
         if snap is None or not snap.model_status:
             self._model_label.update("  Model:   ? unknown")
-            self._model_label.remove_class("value-good", "value-slow")
             self._set_all("---")
             return
 
@@ -332,11 +333,9 @@ class DashboardView(Static):
             self._model_label.remove_class("value-good", "value-slow", "value-warning")
 
         pt = snap.prompt_tps
-        ct = snap.pct_cached
         gt = snap.gen_tps
 
         self._prompt_label.update(f"  Prompt tokens/s:   {self._fmt(pt, '.1f')}")
-        self._cache_label.update(f"  Cache hit ratio:   {self._fmt(ct, '.1f')} %")
         self._sample_label.update(f"  Gen tokens/s:      {self._fmt(gt, '.1f')}")
 
         # Color coding for TPS
@@ -357,21 +356,16 @@ class DashboardView(Static):
         self._prompt_tps.update(f"  Prompt avg TPS:   {self._fmt(snap.prompt_tps_avg, '.1f')}")
         self._gen_tps.update(f"  Gen avg TPS:      {self._fmt(snap.gen_tps_avg, '.1f')}")
 
-        self._cached.update(f"  Cached tokens:   {snap.n_tokens_cached:>10,}")
-        self._pred.update(f"  Predicted:        {snap.n_tokens_pred:>10,}")
-        self._active_ctx.update(f"  Active contexts: {snap.n_context:>10,}")
-
     def _fmt(self, val: float | None, fmt: str) -> str:
         if val is None:
             return "---"
         return f"{val:{fmt}}"
 
     def _set_all(self, val: str):
-        for label in [self._prompt_label, self._cache_label, self._sample_label,
-                       self._prompt_dur, self._token_dur,
-                       self._total_tokens, self._total_prompts, self._total_samples,
-                        self._prompt_tps, self._gen_tps,
-                       self._cached, self._pred, self._active_ctx, self._model_label]:
+        for label in [self._prompt_label, self._sample_label,
+                        self._prompt_dur, self._token_dur,
+                        self._total_tokens, self._total_prompts, self._total_samples,
+                         self._prompt_tps, self._gen_tps, self._model_label]:
             parts = label.plain.split(":")
             label_text = f"  {parts[0]}: {val}" if len(parts) > 1 else label.plain
             label.update(label_text)
@@ -406,16 +400,13 @@ class HistoryChart(Static):
     def compose(self) -> ComposeResult:
         yield Label("TPS History (30s)", classes="chart-title")
         self._prompt_hist = deque(maxlen=30)
-        self._cache_hist = deque(maxlen=30)
         self._sample_hist = deque(maxlen=30)
         self._canvas = Label("")
         yield self._canvas
 
-    def add_point(self, prompt: float | None, cached: float | None, sample: float | None):
+    def add_point(self, prompt: float | None, sample: float | None):
         if prompt is not None:
             self._prompt_hist.append(prompt)
-        if cached is not None:
-            self._cache_hist.append(cached)
         if sample is not None:
             self._sample_hist.append(sample)
         self._draw()
@@ -463,6 +454,21 @@ class     MainScreen(Screen):
         border: solid cyan;
     }
 
+    #url-display {
+        width: 100%;
+        text-align: center;
+    }
+
+    #status-display {
+        width: 100%;
+        text-align: center;
+    }
+
+    .generating {
+        color: #ffcc00;
+        text-style: bold;
+    }
+
     #main-content {
         width: 100%;
         height: 100%;
@@ -472,7 +478,7 @@ class     MainScreen(Screen):
 
     #footer-info {
         dock: bottom;
-        height: 4;
+        height: 3;
         width: 100%;
         padding: 0 2;
         background: #1a1b26;
@@ -482,7 +488,7 @@ class     MainScreen(Screen):
         dock: bottom;
         height: 10;
         width: 100%;
-        margin-bottom: 5;
+        margin-bottom: 4;
     }
 
     .hint-text {
@@ -504,7 +510,7 @@ class     MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Container(id="header-row"):
+        with Horizontal(id="header-row"):
             self._url = Label("", id="url-display")
             self._status = Label("", id="status-display")
             yield self._url
@@ -517,22 +523,19 @@ class     MainScreen(Screen):
 
         with Container(id="footer-info"):
             yield Label(
-                "  ▶  Run:  podman run --rm -it --network host llama-metrics-tui",
+                f"  ▶ Log: /var/log/llama/server.log → podman run --rm -it -v llama-logs:/var/log/llama:ro llama-metrics-tui",
                 classes="hint-text",
             )
             yield Label(
-                "  ▶  Model env:  LLAMA_MODEL=qwen  podman run -e LLAMA_MODEL=qwen ...",
-                classes="hint-text",
-            )
-            yield Label(
-                "  Press q or Ctrl + D to exit",
+                "  ▶ Model env:  LLAMA_MODEL=qwen  podman run -e LLAMA_MODEL=qwen ...",
                 classes="hint-text",
             )
 
         yield Footer()
 
     def on_mount(self) -> None:
-        self._client = MetricsClient()
+        log_path = os.getenv("LLAMA_LOG_PATH", DEFAULT_LOG_PATH)
+        self._client = LogTailer(log_path)
         self._history = []
         self._snapshots = deque(maxlen=POLL_INTERVAL * 2)
         self._set_url_default()
@@ -540,12 +543,12 @@ class     MainScreen(Screen):
 
     def _set_url_default(self):
         model = _get_model_param().split("=")[-1]
-        self._url.update(f"llama.cpp metrics → localhost:8080?model={model}")
+        self._url.update(f"llama.cpp metrics → log: /var/log/llama/server.log")
         self._status.update("● Connecting...")
         self._status.add_class("status-disconnected")
 
     def get_metrics(self) -> MetricSnapshot | None:
-        """Busca uma nova leitura das métricas."""
+        """Busca uma nova leitura das métricas via log tailer."""
         return self._client.poll()
 
     watch_metrics = get_metrics
@@ -563,7 +566,7 @@ class     MainScreen(Screen):
         if snap:
             chart = self.query_one("#chart", HistoryChart)
             if snap.prompt_tps is not None or snap.gen_tps is not None:
-                chart.add_point(snap.prompt_tps, snap.pct_cached, snap.gen_tps)
+                chart.add_point(snap.prompt_tps, snap.gen_tps)
 
             self._status.update("● Connected")
             self._status.remove_class("status-disconnected")
@@ -575,8 +578,13 @@ class     MainScreen(Screen):
             self._status.remove_class("status-connected")
             if self._connect_attempts >= POLL_INTERVAL * 2:
                 self._status.update(
-                    "● Disconnected — check compose.yaml for 'LLAMA_ARG_ENDPOINT_METRICS=true' env var"
+                    "● Disconnected — check compose.yaml for 'llama-logs' volume"
                 )
+
+    def on_key(self, event):
+        if event.key == "q":
+            event.stop()
+            self.app.exit()
 
 
 class MetricsApp(App):
