@@ -8,6 +8,7 @@ services:
     volumes:
       - ${MODELS_DIR:?Set MODELS_DIR in .env}:/models:ro
       - ./start-llama.sh:/start-llama.sh:ro
+      - llama-logs:/var/log/llama
     environment:
       LLAMA_CACHE: /models
       LLAMA_MODEL: unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M
@@ -43,5 +44,21 @@ services:
     depends_on:
       - llama-server
 
+  llama-metrics:
+    image: llama-metrics-tui:latest
+    build:
+      context: .
+      dockerfile: llama_metrics/Containerfile
+    stdin_open: true
+    tty: true
+    volumes:
+      - llama-logs:/var/log/llama:ro
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:ro
+    environment:
+      - LLAMA_MODEL=${LLAMA_MODEL:-unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M}
+    depends_on:
+      - llama-server
+
 volumes:
   open-webui-data:
+  llama-logs:

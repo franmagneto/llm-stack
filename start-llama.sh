@@ -20,8 +20,12 @@ SERVER_URL="${LLAMA_SERVER_URL:-http://localhost:8080}"
 RETRY="${LLAMA_LOAD_RETRY:-10}"
 INTERVAL="${LLAMA_LOAD_INTERVAL_s:-1}"
 
-# Iniciar llama-server em background
-/app/llama-server "$@" &
+# Criar diretório de logs compartilhado (volume)
+mkdir -p /var/log/llama
+LOG_FILE="/var/log/llama/server.log"
+
+# Iniciar llama-server em background com logs redirecionados para arquivo + console
+/app/llama-server "$@" >> "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
 # Aguardar o servidor responder em /health
