@@ -81,9 +81,10 @@ class MetricSnapshot:
 class MetricsClient:
     """Busca status do modelo via /models. Métricas vêm do log via LogTailer."""
 
-    def __init__(self, models_url: str = DEFAULT_MODELS_URL):
-        self.models_url = models_url
-        self._api_base = "http://localhost:8080/v1"
+    def __init__(self, models_url: str | None = None):
+        api_base = os.getenv("LLAMA_API_URL", "http://localhost:8080")
+        self.models_url = models_url or f"{api_base}/models"
+        self._api_base = f"{api_base}/v1"
 
     def poll_model_status(self) -> ModelStatus:
         """Busca status do modelo via /models."""
