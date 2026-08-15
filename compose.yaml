@@ -19,11 +19,8 @@ services:
       - /models/models.ini
       - --no-models-autoload
       - --jinja
-      - --host
-      - 0.0.0.0
       - --port
       - "8080"
-      - --metrics
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 30s
