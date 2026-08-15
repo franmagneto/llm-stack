@@ -188,12 +188,17 @@ class LogTailer:
             )
             return self._last_snapshot
 
-        # Durante processamento/geração: snapshot vivo do acumulador
-        return MetricSnapshot(
-            model_status=model_status,
-            prompt_tps=self._accumulator.prompt_tps,
-            gen_tps=self._accumulator.gen_tps,
-        )
+        # Durante processamento/geração: sempre atualizar _last_snapshot
+        # com os valores vivos do acumulador (ou manter antigos se não há novo)
+        if self._last_snapshot is None:
+            self._last_snapshot = MetricSnapshot(model_status=model_status)
+
+        self._last_snapshot.model_status = model_status
+        if self._accumulator.prompt_tps is not None:
+            self._last_snapshot.prompt_tps = self._accumulator.prompt_tps
+        if self._accumulator.gen_tps is not None:
+            self._last_snapshot.gen_tps = self._accumulator.gen_tps
+        return self._last_snapshot
 
     def close(self):
         self._close()
