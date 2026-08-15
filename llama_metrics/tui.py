@@ -152,7 +152,7 @@ class LogTailer:
         return lines
 
     def poll(self) -> MetricSnapshot | None:
-        """Lê novas linhas do log, parseia, retorna MetricSnapshot com última entrada completa."""
+        """Lê novas linhas do log, parseia, retorna MetricSnapshot."""
         model_status = MetricsClient().poll_model_status()
 
         lines = self._read_new_lines()
@@ -162,13 +162,14 @@ class LogTailer:
                 return self._last_snapshot
             return MetricSnapshot(model_status=model_status)
 
-        # Processar linhas no accumulator para construir LogEntry completo
+        # Processar linhas no accumulator
         response_entry = None
         for line in lines:
             result = self._accumulator.process_line(line)
             if result is not None and result.type == "total":
                 response_entry = result
 
+        # Resposta completa: snapshot final com todos os campos
         if response_entry:
             self._last_snapshot = MetricSnapshot(
                 model_status=model_status,
@@ -187,20 +188,12 @@ class LogTailer:
             )
             return self._last_snapshot
 
-        # Se não há resposta completa, usa gen_tps atual do acumulador
-        if self._last_snapshot:
-            self._last_snapshot.model_status = model_status
-            self._last_snapshot.prompt_tps = self._accumulator.prompt_tps or self._last_snapshot.prompt_tps
-            self._last_snapshot.gen_tps = self._accumulator.gen_tps or self._last_snapshot.gen_tps
-            return self._last_snapshot
-
-        self._last_snapshot = MetricSnapshot(
+        # Durante processamento/geração: snapshot vivo do acumulador
+        return MetricSnapshot(
             model_status=model_status,
             prompt_tps=self._accumulator.prompt_tps,
             gen_tps=self._accumulator.gen_tps,
-            _entry=None,
         )
-        return self._last_snapshot
 
     def close(self):
         self._close()
