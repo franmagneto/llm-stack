@@ -84,6 +84,21 @@ podman compose up -d
 
 O Open WebUI usa a API compatível com OpenAI em `http://llama-server:8080/v1`.
 
+## Métricas (TUI)
+
+Dashboard em tempo real com tokens/s, latência e throughput do llama-server.
+Os dados vêm do log compartilhado (`llama-logs:/var/log/llama`).
+
+```bash
+# Iniciar server + webui em background
+podman compose up -d
+
+# Abrir TUI de métricas em foreground
+podman compose --profile metrics up llama-metrics
+```
+
+Fechar com `Ctrl+C`. O server continua rodando em background.
+
 ## Gerenciar modelos
 
 ```bash
