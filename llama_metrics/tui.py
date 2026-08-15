@@ -117,6 +117,7 @@ class LogTailer:
         self._position = 0
         self._accumulator = MetricsAccumulator()
         self._buffer: list[str] = []
+        self._last_snapshot: MetricSnapshot | None = None
 
     def _open(self):
         try:
@@ -156,6 +157,9 @@ class LogTailer:
 
         lines = self._read_new_lines()
         if not lines:
+            if self._last_snapshot:
+                self._last_snapshot.model_status = model_status
+                return self._last_snapshot
             return MetricSnapshot(model_status=model_status)
 
         # Processar linhas no accumulator para construir LogEntry completo
@@ -166,7 +170,7 @@ class LogTailer:
                 response_entry = result
 
         if response_entry:
-            snap = MetricSnapshot(
+            self._last_snapshot = MetricSnapshot(
                 model_status=model_status,
                 prompt_tps=response_entry.prompt_tps,
                 gen_tps=response_entry.gen_tps,
@@ -181,16 +185,22 @@ class LogTailer:
                 prompt_tps_avg=response_entry.prompt_tps,
                 _entry=response_entry,
             )
-            return snap
+            return self._last_snapshot
 
         # Se não há resposta completa, usa gen_tps atual do acumulador
-        snap = MetricSnapshot(
+        if self._last_snapshot:
+            self._last_snapshot.model_status = model_status
+            self._last_snapshot.prompt_tps = self._accumulator.prompt_tps or self._last_snapshot.prompt_tps
+            self._last_snapshot.gen_tps = self._accumulator.gen_tps or self._last_snapshot.gen_tps
+            return self._last_snapshot
+
+        self._last_snapshot = MetricSnapshot(
             model_status=model_status,
             prompt_tps=self._accumulator.prompt_tps,
             gen_tps=self._accumulator.gen_tps,
             _entry=None,
         )
-        return snap
+        return self._last_snapshot
 
     def close(self):
         self._close()
