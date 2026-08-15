@@ -1,10 +1,10 @@
 """Parser para extrair métricas dos logs do llama-server.
 
-Patterns baseados no formato de log do llama.cpp:
-  prompt eval time =   1234.56 ms /    50 tokens (  24.69 ms per token,    40.48 tokens per second)
-       eval time =    567.89 ms /    10 tokens (  56.79 ms per token,    17.60 tokens per second)
-      total time =    1802.45 ms /    60 tokens
-n_gen = 0123, tg = 12.34 t/s, tg_3s = 11.87 t/s
+Patterns baseados no formato REAL do llama.cpp (slot print_timing):
+  [PID] timestamp I slot print_timing: id  N | task N | prompt eval time =   1234.56 ms /    50 tokens (  24.69 ms per token,    40.48 tokens per second)
+  [PID] timestamp I slot print_timing: id  N | task N |        eval time =    567.89 ms /    10 tokens (  56.79 ms per token,    17.60 tokens per second)
+  [PID] timestamp I slot print_timing: id  N | task N |       total time =    1802.45 ms /    60 tokens
+  [PID] timestamp I slot print_timing: id  N | task N | n_decoded =    123, tg =  12.34 t/s, tg_3s =  11.87 t/s
 """
 
 from __future__ import annotations
@@ -59,12 +59,11 @@ TOTAL_TIME_RE = re.compile(
     r'total time =\s+([\d.]+)\s+ms\s*/\s+(\d+)\s+tokens'
 )
 TPS_LINE_RE = re.compile(
-    r'n_gen\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
+    r'n_decoded\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
 )
 DRAFT_RE = re.compile(
     r'draft acceptance = [\d.]+ \((\d+) accepted / (\d+) generated\)'
 )
-RESPONSE_START_RE = re.compile(r'processing prompt tokens:\s+(\d+)')
 
 
 class MetricsAccumulator:
@@ -79,14 +78,6 @@ class MetricsAccumulator:
     """
 
     def __init__(self):
-        # Última resposta completa
-        self._last_entry: LogEntry | None = None
-        # Prompt tokens durante processamento
-        self._prompt_tokens: int = 0
-        # Temporário para prompt tokens
-        self._accumulated_prompt_tokens: int = 0
-        self._accumulated_gen_tokens: int = 0
-        self._accumulated_total_tokens: int = 0
         self.reset()
 
     def reset(self):
@@ -94,7 +85,6 @@ class MetricsAccumulator:
         self.gen_duration_ms: float | None = None
         self.prompt_tokens: int = 0
         self.gen_tokens: int = 0
-        self.total_tokens: int = 0
         self.prompt_tps: float | None = None
         self.gen_tps: float | None = None
         self.tg_3s: float | None = None
@@ -102,16 +92,6 @@ class MetricsAccumulator:
     def process_line(self, line: str) -> LogEntry | None:
         """Processa uma linha de log. Retorna LogEntry quando uma resposta completa é detectada."""
         stripped = line.strip()
-
-        # Line: "processing prompt tokens: N" — inicia nova resposta
-        m = RESPONSE_START_RE.search(stripped)
-        if m:
-            self._accumulated_prompt_tokens = int(m.group(1))
-            # Retorna LogEntry para tracking de prompt_tokens
-            return LogEntry(
-                type="prompt_tokens",
-                count=int(m.group(1)),
-            )
 
         # Line: "prompt eval time = ..."
         m = PROMPT_EVAL_RE.search(stripped)
@@ -157,15 +137,10 @@ class MetricsAccumulator:
                 self.gen_tokens = max(total_token_count - self.prompt_tokens, 0)
             self.total_tokens = total_token_count
 
-            # Construir e limpar o último LogEntry
-            # Usa _accumulated_prompt_tokens se prompt_tokens não foi capturado
-            actual_prompt_tokens = self._accumulated_prompt_tokens if self._accumulated_prompt_tokens > 0 else self.prompt_tokens
-            actual_gen_tokens = max(total_token_count - actual_prompt_tokens, 0) if self.gen_tokens == 0 else self.gen_tokens
-
             entry = LogEntry(
                 type="total",
-                prompt_tokens=actual_prompt_tokens,
-                gen_tokens=actual_gen_tokens,
+                prompt_tokens=self.prompt_tokens,
+                gen_tokens=self.gen_tokens,
                 total_tokens=self.total_tokens,
                 prompt_duration_ms=self.prompt_duration_ms,
                 gen_duration_ms=self.gen_duration_ms,

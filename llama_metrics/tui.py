@@ -141,7 +141,10 @@ class LogTailer:
                 return []
 
         lines = []
-        for line in self._file:
+        while True:
+            line = self._file.readline()
+            if not line:
+                break
             lines.append(line)
             self._position = self._file.tell()
         return lines
