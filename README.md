@@ -94,7 +94,7 @@ Os dados vêm do log compartilhado (`llama-logs:/var/log/llama`).
 podman compose up -d
 
 # Abrir TUI de métricas em foreground
-podman compose --profile metrics up llama-metrics
+podman compose --profile metrics run --rm llama-metrics
 ```
 
 Fechar com `Ctrl+C`. O server continua rodando em background.
