@@ -74,6 +74,10 @@ class MetricSnapshot:
     total_prompts: int = 0
     total_samples: int = 0
     n_context: int = 0
+    process_tokens: int = 0  # Tokens processados (durante prompt processing)
+    process_progress: float | None = None  # Progresso da avaliação (0.0-1.0)
+    process_tps: float | None = None  # TPS durante prompt processing
+    process_time_s: float | None = None  # Tempo total em segundos
     raw: dict = field(default_factory=dict)
     _entry: LogEntry | None = field(default=None, repr=False)
 
@@ -184,6 +188,10 @@ class LogTailer:
                 n_context=0,
                 gen_tps_avg=response_entry.gen_tps,
                 prompt_tps_avg=response_entry.prompt_tps,
+                process_tokens=response_entry.process_tokens,
+                process_progress=response_entry.process_progress,
+                process_tps=response_entry.process_tps,
+                process_time_s=response_entry.process_time_s,
                 _entry=response_entry,
             )
             return self._last_snapshot
@@ -198,6 +206,14 @@ class LogTailer:
             self._last_snapshot.prompt_tps = self._accumulator.prompt_tps
         if self._accumulator.gen_tps is not None:
             self._last_snapshot.gen_tps = self._accumulator.gen_tps
+        if self._accumulator.process_tokens > 0:
+            self._last_snapshot.process_tokens = self._accumulator.process_tokens
+        if self._accumulator.process_progress is not None:
+            self._last_snapshot.process_progress = self._accumulator.process_progress
+        if self._accumulator.process_tps is not None:
+            self._last_snapshot.process_tps = self._accumulator.process_tps
+        if self._accumulator.process_time_s is not None:
+            self._last_snapshot.process_time_s = self._accumulator.process_time_s
         return self._last_snapshot
 
     def close(self):
@@ -251,6 +267,12 @@ class DashboardView(Static):
         background: $boost;
         min-width: 20;
         height: 12;
+    }
+
+    #prompt-progress {
+        background: $boost;
+        height: 8;
+        margin-top: 1;
     }
 
     .metric-text {
@@ -318,12 +340,22 @@ class DashboardView(Static):
                 yield self._prompt_tps
                 yield self._gen_tps
 
+        # Prompt processing progress indicator (shown during prompt_eval)
+        with Vertical(id="prompt-progress"):
+            yield Label("Processing", classes="metric-title")
+            self._progress_label = Label("  Status: ---", classes="metric-text")
+            self._token_progress = Label("  Tokens:  ---", classes="metric-text")
+            yield self._progress_label
+            yield self._token_progress
+
     def update(self, snap: MetricSnapshot | None):
         """Atualiza todos os labels com o snapshot."""
         # Model status always first (before _set_all which resets all labels)
         if snap is None or not snap.model_status:
             self._model_label.update("  Model:   ? unknown")
             self._set_all("---")
+            self._progress_label.update("  Status: ---")
+            self._token_progress.update("  Tokens:  ---")
             return
 
         # Model status
@@ -364,16 +396,36 @@ class DashboardView(Static):
         self._prompt_tps.update(f"  Prompt avg TPS:   {self._fmt(snap.prompt_tps_avg, '.1f')}")
         self._gen_tps.update(f"  Gen avg TPS:      {self._fmt(snap.gen_tps_avg, '.1f')}")
 
+        # Prompt processing progress indicator
+        if snap.process_tokens > 0 or snap.process_progress is not None:
+            progress = snap.process_progress
+            tokens = snap.process_tokens
+            status = "● Processing" if progress is not None and progress < 1.0 else "● Done"
+            progress_str = f"{progress:.0%}" if progress is not None else "..."
+            tps_str = self._fmt(snap.process_tps, '.1f') if snap.process_tps is not None else "---"
+            self._progress_label.update(f"  Status: {status} ({progress_str}, {tps_str} t/s)")
+            self._progress_label.remove_class("value-good", "value-slow", "value-warning")
+            if status == "● Processing":
+                self._progress_label.add_class("value-warning")
+            else:
+                self._progress_label.add_class("value-good")
+            self._token_progress.update(f"  Tokens:  {tokens:,} processed")
+        else:
+            self._progress_label.update("  Status: ---")
+            self._token_progress.update("  Tokens:  ---")
+
     def _fmt(self, val: float | None, fmt: str) -> str:
         if val is None:
             return "---"
         return f"{val:{fmt}}"
 
     def _set_all(self, val: str):
-        for label in [self._prompt_label, self._sample_label,
+        all_labels = [self._prompt_label, self._sample_label,
                         self._prompt_dur, self._token_dur,
                         self._total_tokens, self._total_prompts, self._total_samples,
-                         self._prompt_tps, self._gen_tps, self._model_label]:
+                         self._prompt_tps, self._gen_tps, self._model_label,
+                         self._progress_label, self._token_progress]
+        for label in all_labels:
             parts = label.plain.split(":")
             label_text = f"  {parts[0]}: {val}" if len(parts) > 1 else label.plain
             label.update(label_text)

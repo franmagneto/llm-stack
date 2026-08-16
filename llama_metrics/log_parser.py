@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 @dataclass
 class LogEntry:
     """Uma única entrada de métrica extraída de uma linha de log."""
-    type: str = ""  # prompt_tokens, prompt_eval, eval, total, tps
+    type: str = ""  # prompt_tokens, prompt_eval, eval, total, tps, prompt_progress
     prompt_tokens: int = 0
     gen_tokens: int = 0
     total_tokens: int = 0
@@ -30,6 +30,10 @@ class LogEntry:
     count: int = 0
     n_gen: int = 0
     is_response: bool = False  # True se vem de linha de resposta (prompt/eval/total time)
+    process_tokens: int = 0  # Tokens processados (durante prompt processing)
+    process_progress: float | None = None  # Progresso da avaliação (0.0-1.0)
+    process_tps: float | None = None  # TPS durante prompt processing
+    process_time_s: float | None = None  # Tempo total em segundos
 
     @property
     def gen_tps_avg(self) -> float | None:
@@ -65,6 +69,10 @@ DRAFT_RE = re.compile(
     r'draft acceptance = [\d.]+ \((\d+) accepted / (\d+) generated\)'
 )
 
+PROMPT_PROCESSING_RE = re.compile(
+    r'prompt processing,\s*n_tokens\s*=\s*(\d+),\s*progress\s*=\s*([\d.]+),\s*t\s*=\s*([\d.]+)\s*s\s*/\s*([\d.]+)\s*tokens\s*per\s*second'
+)
+
 
 class MetricsAccumulator:
     """Acumula estado entre linhas de log para construir um LogEntry completo.
@@ -88,6 +96,10 @@ class MetricsAccumulator:
         self.prompt_tps: float | None = None
         self.gen_tps: float | None = None
         self.tg_3s: float | None = None
+        self.process_tokens: int = 0
+        self.process_progress: float | None = None
+        self.process_tps: float | None = None
+        self.process_time_s: float | None = None
 
     def process_line(self, line: str) -> LogEntry | None:
         """Processa uma linha de log. Retorna LogEntry quando uma resposta completa é detectada."""
@@ -161,6 +173,21 @@ class MetricsAccumulator:
                 gen_tps=self.gen_tps,
                 tg_3s=self.tg_3s,
                 n_gen=int(m.group(1)),
+            )
+
+        # Line: "prompt processing, n_tokens = N, progress = X.XX, t = Y.YY s / Z.ZZ tokens per second"
+        m = PROMPT_PROCESSING_RE.search(stripped)
+        if m:
+            self.process_tokens = int(m.group(1))
+            self.process_progress = float(m.group(2))
+            self.process_time_s = float(m.group(3))
+            self.process_tps = float(m.group(4))
+            return LogEntry(
+                type="prompt_progress",
+                process_tokens=self.process_tokens,
+                process_progress=self.process_progress,
+                process_tps=self.process_tps,
+                process_time_s=self.process_time_s,
             )
 
         return None
