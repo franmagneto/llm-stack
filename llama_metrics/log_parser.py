@@ -68,7 +68,7 @@ TOTAL_TIME_RE = re.compile(
     r'total time =\s+([\d.]+)\s+ms\s*/\s+(\d+)\s+tokens'
 )
 TPS_LINE_RE = re.compile(
-    r'n_decoded\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
+    r'n_gen\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
 )
 DRAFT_RE = re.compile(
     r'draft acceptance = ([\d.]+) \(\s*(\d+) accepted / \s*(\d+) generated\),\s*mean len = ([\d.]+)'
@@ -109,6 +109,7 @@ class MetricsAccumulator:
         self.draft_total: int = 0
         self.draft_ratio: float | None = None
         self.mean_acc_len: float | None = None
+        self._has_pending_response: bool = False
 
     def process_line(self, line: str) -> LogEntry | None:
         """Processa uma linha de log. Retorna LogEntry quando uma resposta completa é detectada."""
@@ -117,6 +118,21 @@ class MetricsAccumulator:
         # Line: "prompt eval time = ..."
         m = PROMPT_EVAL_RE.search(stripped)
         if m:
+            # Se há dados pendentes de uma requisição anterior (MTP desabilitado), retornar
+            if self._has_pending_response:
+                entry = LogEntry(
+                    type="total",
+                    prompt_tokens=self.prompt_tokens,
+                    gen_tokens=self.gen_tokens,
+                    total_tokens=self.total_tokens,
+                    prompt_duration_ms=self.prompt_duration_ms,
+                    gen_duration_ms=self.gen_duration_ms,
+                    prompt_tps=self.prompt_tps,
+                    gen_tps=self.gen_tps,
+                    is_response=True,
+                )
+                self.reset()
+                return entry
             self.prompt_duration_ms = float(m.group(1))
             prompt_token_count = int(m.group(2))
             self.prompt_tokens = prompt_token_count
@@ -157,20 +173,9 @@ class MetricsAccumulator:
             if self.gen_tokens == 0:
                 self.gen_tokens = max(total_token_count - self.prompt_tokens, 0)
             self.total_tokens = total_token_count
-
-            entry = LogEntry(
-                type="total",
-                prompt_tokens=self.prompt_tokens,
-                gen_tokens=self.gen_tokens,
-                total_tokens=self.total_tokens,
-                prompt_duration_ms=self.prompt_duration_ms,
-                gen_duration_ms=self.gen_duration_ms,
-                prompt_tps=self.prompt_tps,
-                gen_tps=self.gen_tps,
-                is_response=True,
-            )
-            self.reset()
-            return entry
+            self._has_pending_response = True
+            # NÃO retorna ainda - aguardar n_gen e draft acceptance
+            return None
 
         # Line: "n_gen = N, tg = X t/s, ..." (durante geração)
         m = TPS_LINE_RE.search(stripped)
@@ -206,13 +211,24 @@ class MetricsAccumulator:
             self.draft_accepted = int(m.group(2))
             self.draft_total = int(m.group(3))
             self.mean_acc_len = float(m.group(4))
-            return LogEntry(
+            # Após draft acceptance, retornar resposta completa e resetar
+            entry = LogEntry(
                 type="draft",
-                draft_ratio=self.draft_ratio,
+                prompt_tokens=self.prompt_tokens,
+                gen_tokens=self.gen_tokens,
+                total_tokens=self.total_tokens,
+                prompt_duration_ms=self.prompt_duration_ms,
+                gen_duration_ms=self.gen_duration_ms,
+                prompt_tps=self.prompt_tps,
+                gen_tps=self.gen_tps,
                 draft_accepted=self.draft_accepted,
                 draft_total=self.draft_total,
+                draft_ratio=self.draft_ratio,
                 mean_acc_len=self.mean_acc_len,
+                is_response=True,
             )
+            self.reset()
+            return entry
 
         return None
 

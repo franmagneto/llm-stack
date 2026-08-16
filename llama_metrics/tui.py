@@ -174,7 +174,7 @@ class LogTailer:
         response_entry = None
         for line in lines:
             result = self._accumulator.process_line(line)
-            if result is not None and result.type == "total":
+            if result is not None and result.type in ("total", "draft"):
                 response_entry = result
 
         # Resposta completa: snapshot final com todos os campos
@@ -476,7 +476,8 @@ class DashboardView(Static):
                         self._prompt_dur, self._token_dur,
                         self._total_tokens, self._total_prompts, self._total_samples,
                          self._prompt_tps, self._gen_tps, self._model_label,
-                         self._progress_label, self._token_progress]
+                         self._progress_label, self._token_progress,
+                         self._draft_ratio, self._draft_mean_len, self._draft_accepted]
         for label in all_labels:
             parts = label.plain.split(":")
             label_text = f"  {parts[0]}: {val}" if len(parts) > 1 else label.plain
