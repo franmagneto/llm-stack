@@ -71,7 +71,7 @@ TPS_LINE_RE = re.compile(
     r'n_gen\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
 )
 DRAFT_RE = re.compile(
-    r'draft acceptance = ([\d.]+) \(\s*(\d+) accepted / \s*(\d+) generated\),\s*mean len = ([\d.]+)'
+    r'draft acceptance = ([\d.]+) \(\s*(\d+) accepted / \s*(\d+) generated\),\s*mean len = \s*([\d.]+)'
 )
 
 PROMPT_PROCESSING_RE = re.compile(
@@ -98,6 +98,7 @@ class MetricsAccumulator:
         self.gen_duration_ms: float | None = None
         self.prompt_tokens: int = 0
         self.gen_tokens: int = 0
+        self.total_tokens: int = 0
         self.prompt_tps: float | None = None
         self.gen_tps: float | None = None
         self.tg_3s: float | None = None
