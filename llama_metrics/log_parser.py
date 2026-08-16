@@ -5,6 +5,7 @@ Patterns baseados no formato REAL do llama.cpp (slot print_timing):
   [PID] timestamp I slot print_timing: id  N | task N |        eval time =    567.89 ms /    10 tokens (  56.79 ms per token,    17.60 tokens per second)
   [PID] timestamp I slot print_timing: id  N | task N |       total time =    1802.45 ms /    60 tokens
   [PID] timestamp I slot print_timing: id  N | task N | n_decoded =    123, tg =  12.34 t/s, tg_3s =  11.87 t/s
+  [PID] timestamp I slot print_timing: id  N | task N | draft acceptance = 0.50000 (  10 accepted /   20 generated), mean len = 1.50
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 @dataclass
 class LogEntry:
     """Uma única entrada de métrica extraída de uma linha de log."""
-    type: str = ""  # prompt_tokens, prompt_eval, eval, total, tps, prompt_progress
+    type: str = ""  # prompt_tokens, prompt_eval, eval, total, tps, prompt_progress, draft
     prompt_tokens: int = 0
     gen_tokens: int = 0
     total_tokens: int = 0
@@ -34,6 +35,10 @@ class LogEntry:
     process_progress: float | None = None  # Progresso da avaliação (0.0-1.0)
     process_tps: float | None = None  # TPS durante prompt processing
     process_time_s: float | None = None  # Tempo total em segundos
+    draft_accepted: int = 0  # Draft tokens aceitos (MTP)
+    draft_total: int = 0  # Draft tokens gerados (MTP)
+    draft_ratio: float | None = None  # Taxa de aceitação MTP (0.0-1.0)
+    mean_acc_len: float | None = None  # Comprimento médio de aceitação (MTP)
 
     @property
     def gen_tps_avg(self) -> float | None:
@@ -63,10 +68,10 @@ TOTAL_TIME_RE = re.compile(
     r'total time =\s+([\d.]+)\s+ms\s*/\s+(\d+)\s+tokens'
 )
 TPS_LINE_RE = re.compile(
-    r'n_decoded\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
+    r'n_gen\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?'
 )
 DRAFT_RE = re.compile(
-    r'draft acceptance = [\d.]+ \((\d+) accepted / (\d+) generated\)'
+    r'draft acceptance = ([\d.]+) \(\s*(\d+) accepted / \s*(\d+) generated\),\s*mean len = ([\d.]+)'
 )
 
 PROMPT_PROCESSING_RE = re.compile(
@@ -100,6 +105,11 @@ class MetricsAccumulator:
         self.process_progress: float | None = None
         self.process_tps: float | None = None
         self.process_time_s: float | None = None
+        self.draft_accepted: int = 0
+        self.draft_total: int = 0
+        self.draft_ratio: float | None = None
+        self.mean_acc_len: float | None = None
+        self._has_pending_response: bool = False
 
     def process_line(self, line: str) -> LogEntry | None:
         """Processa uma linha de log. Retorna LogEntry quando uma resposta completa é detectada."""
@@ -108,6 +118,21 @@ class MetricsAccumulator:
         # Line: "prompt eval time = ..."
         m = PROMPT_EVAL_RE.search(stripped)
         if m:
+            # Se há dados pendentes de uma requisição anterior (MTP desabilitado), retornar
+            if self._has_pending_response:
+                entry = LogEntry(
+                    type="total",
+                    prompt_tokens=self.prompt_tokens,
+                    gen_tokens=self.gen_tokens,
+                    total_tokens=self.total_tokens,
+                    prompt_duration_ms=self.prompt_duration_ms,
+                    gen_duration_ms=self.gen_duration_ms,
+                    prompt_tps=self.prompt_tps,
+                    gen_tps=self.gen_tps,
+                    is_response=True,
+                )
+                self.reset()
+                return entry
             self.prompt_duration_ms = float(m.group(1))
             prompt_token_count = int(m.group(2))
             self.prompt_tokens = prompt_token_count
@@ -148,20 +173,9 @@ class MetricsAccumulator:
             if self.gen_tokens == 0:
                 self.gen_tokens = max(total_token_count - self.prompt_tokens, 0)
             self.total_tokens = total_token_count
-
-            entry = LogEntry(
-                type="total",
-                prompt_tokens=self.prompt_tokens,
-                gen_tokens=self.gen_tokens,
-                total_tokens=self.total_tokens,
-                prompt_duration_ms=self.prompt_duration_ms,
-                gen_duration_ms=self.gen_duration_ms,
-                prompt_tps=self.prompt_tps,
-                gen_tps=self.gen_tps,
-                is_response=True,
-            )
-            self.reset()
-            return entry
+            self._has_pending_response = True
+            # NÃO retorna ainda - aguardar n_gen e draft acceptance
+            return None
 
         # Line: "n_gen = N, tg = X t/s, ..." (durante geração)
         m = TPS_LINE_RE.search(stripped)
@@ -189,6 +203,32 @@ class MetricsAccumulator:
                 process_tps=self.process_tps,
                 process_time_s=self.process_time_s,
             )
+
+        # Line: "draft acceptance = X.XXXXX (N accepted / N generated), mean len = X.XX"
+        m = DRAFT_RE.search(stripped)
+        if m:
+            self.draft_ratio = float(m.group(1))
+            self.draft_accepted = int(m.group(2))
+            self.draft_total = int(m.group(3))
+            self.mean_acc_len = float(m.group(4))
+            # Após draft acceptance, retornar resposta completa e resetar
+            entry = LogEntry(
+                type="draft",
+                prompt_tokens=self.prompt_tokens,
+                gen_tokens=self.gen_tokens,
+                total_tokens=self.total_tokens,
+                prompt_duration_ms=self.prompt_duration_ms,
+                gen_duration_ms=self.gen_duration_ms,
+                prompt_tps=self.prompt_tps,
+                gen_tps=self.gen_tps,
+                draft_accepted=self.draft_accepted,
+                draft_total=self.draft_total,
+                draft_ratio=self.draft_ratio,
+                mean_acc_len=self.mean_acc_len,
+                is_response=True,
+            )
+            self.reset()
+            return entry
 
         return None
 
