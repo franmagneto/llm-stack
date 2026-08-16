@@ -1,21 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMG="llama-metrics-tui:latest"
-BUILD_CMD="podman"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Detect docker se podman não existir
-[ ! -x "$(command -v podman 2>/dev/null)" ] && BUILD_CMD="docker"
+case "${1:-help}" in
+    build)
+        echo "Building TUI container image..."
+        podman compose --profile metrics build
+        ;;
+    up)
+        echo "Starting llama-server + Open WebUI..."
+        podman compose up -d
+        ;;
+    run)
+        echo "Starting TUI (Ctrl+C to exit)..."
+        podman compose --profile metrics run --rm llama-metrics
+        ;;
+    down)
+        echo "Stopping llama-server + Open WebUI..."
+        podman compose down
+        ;;
+    restart)
+        podman compose down
+        podman compose up -d
+        ;;
+    logs)
+        shift
+        podman compose --profile metrics logs --tail=100 "$@"
+        ;;
+    help|*)
+        cat <<EOF
+Usage: $0 {build|up|run|down|restart|logs}
 
-echo "Building container image..."
-$BUILD_CMD build -t "$IMG" -f llama_metrics/Containerfile .
+Commands:
+  build   Build TUI container image
+  up      Start llama-server + Open WebUI in background
+  run     Start TUI metrics dashboard (foreground, Ctrl+C to exit)
+  down    Stop all containers
+  restart Stop and restart all containers
+  logs    Show recent TUI container logs (pass additional args)
 
-echo "Running TUI (container destroyed on exit)..."
-$BUILD_CMD run --rm -it \
-  --network host \
-  -v llama-logs:/var/log/llama:ro \
-  -v ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:ro \
-  -e TERM="${TERM:-xterm-256color}" \
-  -e LLAMA_SERVER_URL="${LLAMA_SERVER_URL:-http://localhost:8080}" \
-  -e LLAMA_MODEL="${LLAMA_MODEL:-unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M}" \
-  "$IMG"
+Examples:
+  $0 up           # start server + webui
+  $0 run          # open TUI dashboard
+  $0 restart      # restart everything
+EOF
+        ;;
+esac
