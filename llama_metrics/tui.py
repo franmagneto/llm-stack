@@ -78,6 +78,10 @@ class MetricSnapshot:
     process_progress: float | None = None  # Progresso da avaliação (0.0-1.0)
     process_tps: float | None = None  # TPS durante prompt processing
     process_time_s: float | None = None  # Tempo total em segundos
+    draft_accepted: int = 0  # Draft tokens aceitos (MTP)
+    draft_total: int = 0  # Draft tokens gerados (MTP)
+    draft_ratio: float | None = None  # Taxa de aceitação MTP (0.0-1.0)
+    mean_acc_len: float | None = None  # Comprimento médio de aceitação (MTP)
     raw: dict = field(default_factory=dict)
     _entry: LogEntry | None = field(default=None, repr=False)
 
@@ -192,6 +196,10 @@ class LogTailer:
                 process_progress=response_entry.process_progress,
                 process_tps=response_entry.process_tps,
                 process_time_s=response_entry.process_time_s,
+                draft_accepted=response_entry.draft_accepted,
+                draft_total=response_entry.draft_total,
+                draft_ratio=response_entry.draft_ratio,
+                mean_acc_len=response_entry.mean_acc_len,
                 _entry=response_entry,
             )
             return self._last_snapshot
@@ -214,6 +222,11 @@ class LogTailer:
             self._last_snapshot.process_tps = self._accumulator.process_tps
         if self._accumulator.process_time_s is not None:
             self._last_snapshot.process_time_s = self._accumulator.process_time_s
+        if self._accumulator.draft_ratio is not None:
+            self._last_snapshot.draft_ratio = self._accumulator.draft_ratio
+            self._last_snapshot.draft_accepted = self._accumulator.draft_accepted
+            self._last_snapshot.draft_total = self._accumulator.draft_total
+            self._last_snapshot.mean_acc_len = self._accumulator.mean_acc_len
         return self._last_snapshot
 
     def close(self):
@@ -272,6 +285,13 @@ class DashboardView(Static):
     #prompt-progress {
         background: $boost;
         height: 8;
+        margin-top: 1;
+    }
+
+    #mtp-metrics {
+        background: $boost;
+        min-width: 25;
+        height: 10;
         margin-top: 1;
     }
 
@@ -348,6 +368,16 @@ class DashboardView(Static):
             yield self._progress_label
             yield self._token_progress
 
+        # MTP / Draft metrics (shown with draft acceptance data)
+        with Vertical(id="mtp-metrics"):
+            yield Label("Draft (MTP)", classes="metric-title")
+            self._draft_ratio = Label("  Acceptance:      ---", classes="metric-text")
+            self._draft_mean_len = Label("  Mean acc len:    ---", classes="metric-text")
+            self._draft_accepted = Label("  Accepted/Total:  ---", classes="metric-text")
+            yield self._draft_ratio
+            yield self._draft_mean_len
+            yield self._draft_accepted
+
     def update(self, snap: MetricSnapshot | None):
         """Atualiza todos os labels com o snapshot."""
         # Model status always first (before _set_all which resets all labels)
@@ -413,6 +443,28 @@ class DashboardView(Static):
         else:
             self._progress_label.update("  Status: ---")
             self._token_progress.update("  Tokens:  ---")
+
+        # MTP / Draft metrics
+        if snap.draft_ratio is not None:
+            draft_acceptance_str = self._fmt(snap.draft_ratio, '.1%')
+            mean_len = snap.mean_acc_len if snap.mean_acc_len is not None else None
+            mean_len_str = self._fmt(mean_len, '.2f') if mean_len is not None else "---"
+            accepted = f"{snap.draft_accepted:,}" if snap.draft_accepted else "---"
+            total = f"{snap.draft_total:,}" if snap.draft_total else "---"
+            self._draft_ratio.update(f"  Acceptance:      {draft_acceptance_str}")
+            self._draft_mean_len.update(f"  Mean acc len:    {mean_len_str}")
+            self._draft_accepted.update(f"  Accepted/Total:  {accepted}/{total}")
+            self._draft_ratio.remove_class("value-good", "value-slow", "value-warning")
+            if snap.draft_ratio is not None and snap.draft_ratio > 0.7:
+                self._draft_ratio.add_class("value-good")
+            elif snap.draft_ratio is not None and snap.draft_ratio > 0.4:
+                pass
+            else:
+                self._draft_ratio.add_class("value-slow")
+        else:
+            self._draft_ratio.update("  Acceptance:      ---")
+            self._draft_mean_len.update("  Mean acc len:    ---")
+            self._draft_accepted.update("  Accepted/Total:  ---/---")
 
     def _fmt(self, val: float | None, fmt: str) -> str:
         if val is None:
