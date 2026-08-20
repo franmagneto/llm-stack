@@ -17,7 +17,7 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, Static, TabbedContent, Tabs
 
-from .log_parser import (
+from log_parser import (
     LogEntry,
     MetricsAccumulator,
 )

@@ -44,8 +44,8 @@ services:
   llama-metrics:
     image: llama-metrics-tui:latest
     build:
-      context: .
-      dockerfile: llama_metrics/Containerfile
+      context: llama_metrics
+      dockerfile: Containerfile
     profiles: ["metrics"]
     stdin_open: true
     tty: true
