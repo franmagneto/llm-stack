@@ -60,14 +60,9 @@ Variáveis de ambiente opcionais:
 
 ## Status de Implementação
 
-✅ **Compose** — llama-server Vulkan com `--no-models-autoload` + Open WebUI via API OpenAI
+✅ **Compose** — llama-server Vulkan com `--models-autoload` (padrão) + Open WebUI via API OpenAI
 ✅ **CLI** — `llama-model.sh` (bash + curl + jq) para `list`, `load`, `unload`
 ✅ **Config** — `LLAMA_CACHE=/models`, `MODELS_DIR` obrigatório via `.env`
 ✅ **Docs** — `.env.example` e `README.md` atualizados
 ✅ **Validação** — `podman compose config` passa; CLI funciona contra container Vulkan
-✅ **Auto-load** — `start-llama.sh` com `LLAMA_AUTO_LOAD_MODEL=true` (compose)
-✅ **Healthcheck** — `/health` via curl, 30s interval, 3 retries
-
-## Próximos Passos
-
-✅ **Auto-load** — testado em produção com sucesso
+✅ **Auto-load sob demanda** — `--models-autoload` (padrão do llama-server) — modelo carrega na primeira requisição

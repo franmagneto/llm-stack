@@ -11,13 +11,10 @@ services:
       - llama-logs:/var/log/llama
     environment:
       LLAMA_CACHE: /models
-      LLAMA_MODEL: unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M
-      LLAMA_AUTO_LOAD_MODEL: "true"
     entrypoint: ["/start-llama.sh"]
     command:
       - --models-preset
       - /models/models.ini
-      - --no-models-autoload
       - --port
       - "8080"
     healthcheck:
