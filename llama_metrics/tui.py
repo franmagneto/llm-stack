@@ -30,14 +30,6 @@ MAX_HISTORY = 30
 DEFAULT_LOG_PATH = "/var/log/llama/server.log"
 
 
-def _get_model_param() -> str:
-    """Retorna o parâmetro de modelo para o endpoint /metrics."""
-    model = os.getenv("LLAMA_MODEL")
-    if model:
-        return f"?model={model}"
-    return "?model=unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M"
-
-
 @dataclass
 class ModelStatus:
     id: str = ""
@@ -102,11 +94,10 @@ class MetricsClient:
                 data = json.loads(resp.read().decode("utf-8"))
 
             models = data.get("data", [])
-            target_model = _get_model_param().split("=")[-1]
 
             for m in models:
-                if m.get("id") == target_model or any(alias == target_model for alias in m.get("aliases", [])):
-                    return ModelStatus(id=m.get("id", ""), value=m.get("status", {}).get("value", "unknown"))
+                if m.get("status", {}).get("value") == "loaded":
+                    return ModelStatus(id=m.get("id", ""), value="loaded")
 
             if models:
                 m = models[0]
@@ -655,8 +646,7 @@ class     MainScreen(Screen):
         self._refresh_id = self.set_interval(POLL_INTERVAL, self.refresh_metrics)
 
     def _set_url_default(self):
-        model = _get_model_param().split("=")[-1]
-        self._url.update(f"llama.cpp metrics → log: /var/log/llama/server.log")
+        self._url.update("llama.cpp metrics → log: /var/log/llama/server.log")
         self._status.update("● Connecting...")
         self._status.add_class("status-disconnected")
 
