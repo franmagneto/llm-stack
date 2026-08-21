@@ -51,7 +51,6 @@ services:
       - llama-logs:/var/log/llama:ro
       - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/user/1000:ro
     environment:
-      LLAMA_MODEL: ${LLAMA_MODEL:-unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q4_K_M}
       LLAMA_API_URL: http://llama-server:8080
     depends_on:
       - llama-server
