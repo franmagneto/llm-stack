@@ -631,7 +631,7 @@ class     MainScreen(Screen):
                 classes="hint-text",
             )
             yield Label(
-                "  ▶ Model env:  LLAMA_MODEL=qwen  podman run -e LLAMA_MODEL=qwen ...",
+                "  ▶ Model:  lido ao vivo do /models do llama-server",
                 classes="hint-text",
             )
 
