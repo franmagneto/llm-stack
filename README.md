@@ -87,7 +87,10 @@ O Open WebUI usa a API compatível com OpenAI em `http://llama-server:8080/v1`.
 ## Métricas (TUI)
 
 Dashboard em tempo real com tokens/s, latência e throughput do llama-server.
-Os dados vêm do log compartilhado (`llama-logs:/var/log/llama`).
+Os dados vêm do log compartilhado (`llama-logs:/var/log/llama`). O modelo
+carregado é lido ao vivo do endpoint `/models` do server — não depende de
+variável de ambiente. O server está configurado com `--models-max 1`,
+garantindo que apenas um modelo fica carregado por vez.
 
 ```bash
 # Iniciar server + webui em background
