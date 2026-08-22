@@ -32,8 +32,16 @@ case "$COMMAND" in
             -d "{\"model\":\"${ARG_MODEL:-$DEFAULT_MODEL}\"}" | jq .
         ;;
     unload)
-        curl -sf -X POST "$SERVER/models/unload" \
-            -H 'Content-Type: application/json' \
-            -d "{\"model\":\"${ARG_MODEL:-$DEFAULT_MODEL}\"}" | jq .
+        if [ -n "$ARG_MODEL" ]; then
+            curl -sf -X POST "$SERVER/models/unload" \
+                -H 'Content-Type: application/json' \
+                -d "{\"model\":\"$ARG_MODEL\"}" | jq .
+        else
+            curl -sf "$SERVER/models" | jq -r '.data[] | select(.status.value == "loaded") | .id' | while read -r model; do
+                curl -sf -X POST "$SERVER/models/unload" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"model\":\"$model\"}" | jq .
+            done
+        fi
         ;;
 esac
